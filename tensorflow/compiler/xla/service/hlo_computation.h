@@ -587,6 +587,9 @@ class HloComputation {
   bool dry() const { return dry_; }
   void set_dry(bool value);
 
+  bool rewrite() const { return rewrite_; }
+  void set_rewrite(bool value);
+
   void RecordAlternatives(HloInstruction* original, HloInstruction* alt);
 
   void Prune();
@@ -693,6 +696,7 @@ class HloComputation {
   std::vector<HloInstruction*> param_instructions_;
 
   bool dry_ = false;
+  bool rewrite_ = false;
   InstructionList dry_new_instructions_;
   absl::flat_hash_map<const HloInstruction*, InstructionList::iterator>
       dry_new_instruction_iterators_;

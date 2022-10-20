@@ -62,6 +62,7 @@ namespace xla {
 
 class HloComputation;
 class HloModule;
+class Rewrite;
 
 std::string PrintName(const std::string& name, bool print_ids);
 
@@ -1521,6 +1522,9 @@ class HloInstruction {
   bool dry() const { return dry_; }
   void set_dry(bool value) { dry_ = value; }
 
+  bool rewrite() const { return rewrite_; }
+  void set_rewrite(bool value) { rewrite_ = value; }
+
   // Returns the sharding applied to this operator.
   // REQUIRES: has_sharding() is true.
   const HloSharding& sharding() const {
@@ -2337,7 +2341,10 @@ class HloInstruction {
   // Intrusive flag used by HloComputation, whether this instruction has
   // been marked as dead.
   bool marked_as_dead_;
+
   bool dry_ = false;
+  bool rewrite_ = false;
+  std::unordered_map<HloInstruction*, std::unique_ptr<Rewrite>> rewrite_plans_;
 
   HloInstruction(const HloInstruction&) = delete;
   HloInstruction& operator=(const HloInstruction&) = delete;
@@ -2397,6 +2404,46 @@ using ConstHloInstructionMap =
 using HloInstructionSet = std::set<HloInstruction*, HloPtrComparator>;
 using ConstHloInstructionSet =
     std::set<const HloInstruction*, HloPtrComparator>;
+
+class Rewrite {
+
+ private:
+  // std::string name;
+  // std::map<HloInstructionPair, HloInstruction*> replacements;
+  // std::vector<std::unique_ptr<HloInstruction>> new_insts;
+  // HloComputation* comp;
+  // std::set<HloInstruction*> to_add;
+  // std::set<HloInstruction*> to_remove;
+  // std::map<HloInstruction*, std::vector<HloInstruction*>> operands;
+
+  HloInstruction* original_;
+  HloInstruction* replacement_;
+
+  HloInstructionSet rewrite_operands_;
+  HloInstructionSet rewrite_users_;
+  HloInstructionSet affected_;
+
+ public:
+  Rewrite(HloInstruction* original, HloInstruction* replacement)
+      : original_(original), replacement_(replacement)  {
+    ComputeRewrite();
+  }
+
+  void AddUser(HloInstruction* user) {
+    rewrite_users_.insert(user);
+  }
+
+  // Given the original instruction and its replacement, compute the users,
+  // operands and affected instructions of this rewrite
+  void ComputeRewrite();
+
+  // Apply the rewrite
+  void Apply();
+
+  // Return whether or not the rewrite is still appliable
+  bool Applicable(HloComputation& comp);
+};
+
 
 }  // namespace xla
 

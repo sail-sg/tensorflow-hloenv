@@ -922,6 +922,21 @@ void HloModule::SetDry(bool dry_mode) {
   }
 }
 
+void HloModule::SetRewrite(bool rewrite_mode) {
+  if (rewrite_mode != rewrite_mode_) {
+    for (xla::HloComputation* computation : MakeNonfusionComputations()) {
+      computation->set_rewrite(rewrite_mode);
+    }
+    rewrite_mode_ = rewrite_mode;
+    // Remove unused computations that might been orphaned during the
+    // set rewrite_off processes (e.g. alternatives deleted due to generating
+    // a cycle)
+    if (!rewrite_mode_) {
+      RemoveUnusedComputations();
+    }
+  }
+}
+
 /* static */ std::atomic<int> HloModule::next_unique_module_id_(0);
 
 }  // namespace xla

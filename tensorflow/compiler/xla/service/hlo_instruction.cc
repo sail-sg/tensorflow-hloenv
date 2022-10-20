@@ -2365,7 +2365,15 @@ void HloInstruction::AppendOperand(HloInstruction* operand) {
         << "Operand " << operand->name() << " is already marked dead";
   }
   operands_.push_back(operand);
+
   operand->AddUser(this);
+
+  // // We either want to set a user connection if both instructions are not
+  // // dry, this can occur if a) the pass is operating in non dry mode or b) they
+  // // are both newly created instructions while a pass is operating in dry mode
+  // if (!rewrite_dry_ && !operand->rewrite_dry()) {
+  //   operand->AddUser(this);
+  // }
 }
 
 void HloInstruction::RemoveOperandsAtAscendingIndices(
@@ -2605,6 +2613,15 @@ Status HloInstruction::ReplaceUseWithDifferentShape(
     HloInstruction* user, HloInstruction* new_producer) {
   VLOG(3) << "Replacing uses of " << name() << " in " << user->name()
           << " with " << new_producer->name();
+
+
+  if (rewrite_) {
+    if (rewrite_plans_.find(new_producer) == rewrite_plans_.end()) {
+      rewrite_plans_[new_producer] = std::make_unique<Rewrite>(this, new_producer);
+    }
+    rewrite_plans_[new_producer]->AddUser(user);
+    return Status::OK();
+  }
 
   if (dry_) {
     parent_->RecordAlternatives(this, new_producer);
@@ -4805,6 +4822,92 @@ const TriangularSolveOptions& HloInstruction::triangular_solve_options() const {
 
 const CholeskyOptions& HloInstruction::cholesky_options() const {
   return Cast<HloCholeskyInstruction>(this)->cholesky_options();
+}
+
+
+void Rewrite::ComputeRewrite() {
+  CHECK(original_->parent()->rewrite());
+
+  std::unordered_map<HloInstruction*, bool> visited;
+
+  // Step 1, get operands
+  std::vector<HloInstruction*> dfs_stack = {replacement_};
+  while (!dfs_stack.empty()) {
+    HloInstruction* current = dfs_stack.back();
+
+    auto result = visited.insert({current, true});
+    if (!result.second) {  // We've already seen this instruction.
+      dfs_stack.pop_back();
+      continue;
+    }
+
+    for (auto* operand : current->operands()) {
+      if (rewrite_operands_.find(operand) == rewrite_operands_.end()) {
+        // If operand->rewrite() is set to true, it existed in the graph
+        // before any of the rewrites were captures, i.e.:
+        //    We've found an operand of the rewrite subgraph
+        if (operand->rewrite()) {
+          rewrite_operands_.insert(operand);
+          continue;
+        }
+        // This is a newly created instruction
+        else {
+          dfs_stack.push_back(operand);
+        }
+      }
+    }
+  }
+
+  // Step 2, get affected nodes
+  std::vector<HloInstruction*> dfs_stack_affected = {original_};
+  while (!dfs_stack_affected.empty()) {
+    HloInstruction* current = dfs_stack_affected.back();
+
+    auto result = visited.insert({current, true});
+    if (!result.second) {  // We've already seen this instruction.
+      dfs_stack_affected.pop_back();
+      continue;
+    }
+
+    // We should not be reaching any of the newly created instructions here
+    // since the connection has not been made yet, so everything should still
+    // have rewrite enabled
+    for (auto* operand : current->operands()) {
+      CHECK(operand->rewrite());
+
+      if (rewrite_operands_.find(operand) == rewrite_operands_.end()) {
+        affected_.insert(operand);
+        dfs_stack_affected.push_back(operand);
+      }
+      // Traverse until we hit the rewrite operands
+      else {
+        continue;
+      }
+    }
+  }
+
+  // TODO(ohcy) do we need to add channel dependencies and control predecessors?
+}
+
+void Rewrite::Apply() {
+  original_->parent()->set_rewrite(false);
+  // Note that we cannot just call ReplaceAllUsesWith because sometimes the
+  // user replacement is done only for selective users
+  for (auto* user : rewrite_users_) {
+    original_->ReplaceUseWith(user, replacement_);
+  }
+}
+
+bool Rewrite::Applicable(HloComputation& comp) {
+  if (original_->IsDead()) {
+    return false;
+  }
+  for (auto* operand : rewrite_operands_) {
+    if (operand->IsDead()) {
+      return false;
+    }
+  }
+  return true;
 }
 
 }  // namespace xla

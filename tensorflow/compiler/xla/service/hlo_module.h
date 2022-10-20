@@ -218,6 +218,8 @@ class HloModule {
 
   void SetDry(bool dry_mode);
 
+  void SetRewrite(bool rewrite_mode);
+
   // Compute and return a post order of all computations in the module. The sort
   // is defined like so: if computation A has an instruction which calls
   // computation B, then A will appear after B in the sort.
@@ -454,6 +456,7 @@ class HloModule {
   }
 
   bool dry_mode() const { return dry_mode_; }
+  bool rewrite_mode() const { return rewrite_mode_; }
 
   void set_relative_speedup(double relative_speedup) {
     relative_speedup_ = relative_speedup;
@@ -538,7 +541,9 @@ class HloModule {
   std::string autofdo_fingerprint_;
 
   // Whether or not the module is currently in dry_mode
-  bool dry_mode_ = false;;
+  bool dry_mode_ = false;
+  // Whether or not the module is currently in rewrite_mode
+  bool rewrite_mode_ = false;
 };
 
 }  // namespace xla

@@ -1223,6 +1223,21 @@ bool HloComputation::HasCycle() {
   return HasCycle(root_instruction());
 };
 
+void HloComputation::set_rewrite(bool value) {
+  if (rewrite_ == value) {
+    return;
+  }
+  if (value == true) {
+    // turn on all the flags
+    rewrite_ = true;
+    for (HloInstruction* inst : instructions()) {
+      inst->set_rewrite(true);
+    }
+  } else {
+    return;
+  }
+}
+
 void HloComputation::set_dry(bool value) {
   if (dry_ == value) {
     return;
