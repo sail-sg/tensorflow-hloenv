@@ -2614,12 +2614,17 @@ Status HloInstruction::ReplaceUseWithDifferentShape(
   VLOG(3) << "Replacing uses of " << name() << " in " << user->name()
           << " with " << new_producer->name();
 
-
   if (rewrite_) {
-    if (rewrite_plans_.find(new_producer) == rewrite_plans_.end()) {
-      rewrite_plans_[new_producer] = std::make_unique<Rewrite>(this, new_producer);
+    if (rewrite_map_.find(new_producer) == rewrite_map_.end()) {
+      rewrite_map_[new_producer] = std::make_unique<Rewrite>(this, new_producer);
+      rewrite_plans_.push_back(rewrite_map_[new_producer].get());
     }
-    rewrite_plans_[new_producer]->AddUser(user);
+    // TODO(ohcy): Do we want to differentiate calls to this vs single calls
+    // to replaceUseWith? E.g. for single calls, we have one rewrite plan per
+    // user, even if the replacement instr is the same.
+    // Currently here we just always add to the user set for a replacement inst
+    // Same comment as above.
+    rewrite_map_[new_producer]->AddUser(user);
     return Status::OK();
   }
 
@@ -2686,6 +2691,9 @@ Status HloInstruction::ReplaceUsesWith(absl::Span<HloInstruction* const> users,
   return ReplaceAllUsesWithDifferentShape(users, new_producer);
 }
 
+// TODO(ohcy): Do we want to differentiate calls to this vs single calls
+// to replaceUseWith? E.g. for single calls, we have one rewrite plan per
+// user, even if the replacement instr is the same.
 Status HloInstruction::ReplaceAllUsesWithDifferentShape(
     absl::Span<HloInstruction* const> users, HloInstruction* new_producer) {
   for (HloInstruction* user : users) {
@@ -4283,6 +4291,17 @@ bool HloPtrComparator::operator()(const HloInstruction* const& lhs,
   return lhs->unique_id() < rhs->unique_id();
 }
 
+bool HloPtrPairComparator::operator()(const HloInstructionPair& lhs,
+                                      const HloInstructionPair& rhs) const {
+  HloPtrComparator cmp;
+  if (lhs.first == rhs.first) {
+    return cmp(lhs.second, rhs.second);
+  }
+  else {
+    return cmp(lhs.first, rhs.first);
+  }
+}
+
 Status HloInstruction::GetBackendConfigInternal(
     tensorflow::protobuf::Message* proto) const {
   proto->Clear();
@@ -4826,14 +4845,40 @@ const CholeskyOptions& HloInstruction::cholesky_options() const {
 
 
 void Rewrite::ComputeRewrite() {
+
   CHECK(original_->parent()->rewrite());
 
-  std::unordered_map<HloInstruction*, bool> visited;
+  affected_edges_.clear();
+  rewrite_operands_.clear();
 
-  // Step 1, get operands
-  std::vector<HloInstruction*> dfs_stack = {replacement_};
+  HloInstructionSet orig_descendants;
+
+  // Step 1, get all descendants of original node, since these are the potential
+  // operands of the rewrite plan
+  std::vector<HloInstruction*> dfs_stack = {original_};
   while (!dfs_stack.empty()) {
     HloInstruction* current = dfs_stack.back();
+    auto result = orig_descendants.insert(current);
+
+    if (!result.second) {  // We've already seen this instruction.
+      dfs_stack.pop_back();
+      continue;
+    }
+
+    for (auto* operand : current->operands()) {
+      dfs_stack.push_back(operand);
+    }
+  }
+
+  // Step 2, get operands of rewrite
+  dfs_stack = {replacement_};
+  std::unordered_map<HloInstruction*, bool> visited;
+  while (!dfs_stack.empty()) {
+    HloInstruction* current = dfs_stack.back();
+    // This is a newly created instruction
+    if (!current->rewrite()) {
+      new_instructions_.insert(current);
+    }
 
     auto result = visited.insert({current, true});
     if (!result.second) {  // We've already seen this instruction.
@@ -4843,14 +4888,12 @@ void Rewrite::ComputeRewrite() {
 
     for (auto* operand : current->operands()) {
       if (rewrite_operands_.find(operand) == rewrite_operands_.end()) {
-        // If operand->rewrite() is set to true, it existed in the graph
-        // before any of the rewrites were captures, i.e.:
-        //    We've found an operand of the rewrite subgraph
-        if (operand->rewrite()) {
+        // the highest common descendants of the original and replacement
+        // instructions are the operands of the rewrite plan
+        if (orig_descendants.find(operand) != orig_descendants.end()) {
           rewrite_operands_.insert(operand);
           continue;
         }
-        // This is a newly created instruction
         else {
           dfs_stack.push_back(operand);
         }
@@ -4858,34 +4901,68 @@ void Rewrite::ComputeRewrite() {
     }
   }
 
-  // Step 2, get affected nodes
-  std::vector<HloInstruction*> dfs_stack_affected = {original_};
-  while (!dfs_stack_affected.empty()) {
-    HloInstruction* current = dfs_stack_affected.back();
+  // New rewrite plan
+  //
+  // affected_edges = []
+  //
+  // Make parental set of [users]
+  // Start from (original)
 
-    auto result = visited.insert({current, true});
-    if (!result.second) {  // We've already seen this instruction.
-      dfs_stack_affected.pop_back();
-      continue;
+  // def process(current):
+  //     for each user of current:
+  //        if user in parental set:
+  //           affected_edges.add(current->user edge)
+  //     if all of current's parents in parental_set and current not in operands_set:
+  //       parental_set.add(current)
+  //       for operand in current.operands
+  //         process(operand)
+  //
+
+  HloInstructionSet user_set(rewrite_users_);
+  dfs_stack = {original_};
+  while (!dfs_stack.empty()) {
+    HloInstruction* current = dfs_stack.back();
+
+    // Note, unlike the loop above we do NOT want to check whether a node
+    // has been visited. This is because if the following pattern happens
+    //
+    //    A
+    //    ^
+    //    | \
+    //    |  C
+    //    |  ^
+    //    | /
+    //    B
+    //
+    // And B is processed before C, C will not have been added to the user set
+    // yet, so it will be counted as having an additional user. However, later
+    // when B is added as an operand of C, it will be proceesed again and this
+    // time C will have been in the user set, so B will be part of the rewrite
+    // plan affected nodes
+    dfs_stack.pop_back();
+
+    // Whether or not a node has a user that's not in the rewrite pattern
+    // replacement
+    bool has_other_user = false;
+    for (auto& user : current->users()) {
+      if (user_set.find(user) != user_set.end()) {
+        affected_edges_.insert(std::make_pair(current, user));
+      }
+      else {
+        has_other_user = true;
+      }
     }
 
-    // We should not be reaching any of the newly created instructions here
-    // since the connection has not been made yet, so everything should still
-    // have rewrite enabled
-    for (auto* operand : current->operands()) {
-      CHECK(operand->rewrite());
-
-      if (rewrite_operands_.find(operand) == rewrite_operands_.end()) {
-        affected_.insert(operand);
-        dfs_stack_affected.push_back(operand);
-      }
-      // Traverse until we hit the rewrite operands
-      else {
-        continue;
+    // If this node has no users outside of the rewrite pattern, and it is not
+    // one of the rewrite operands, continue processing its children
+    if (!has_other_user &&
+        rewrite_operands_.find(current) == rewrite_operands_.end()) {
+      user_set.insert(current);
+      for (auto* operand : current->operands()) {
+        dfs_stack.push_back(operand);
       }
     }
   }
-
   // TODO(ohcy) do we need to add channel dependencies and control predecessors?
 }
 
@@ -4896,10 +4973,14 @@ void Rewrite::Apply() {
   for (auto* user : rewrite_users_) {
     original_->ReplaceUseWith(user, replacement_);
   }
+
+  for (auto* instr : new_instructions_) {
+    original_->parent()->AddRewriteInstruction(instr);
+  }
 }
 
 bool Rewrite::Applicable(HloComputation& comp) {
-  if (original_->IsDead()) {
+  if (original_->IsDead() || replacement_->IsDead()) {
     return false;
   }
   for (auto* operand : rewrite_operands_) {

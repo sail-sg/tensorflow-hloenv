@@ -132,7 +132,14 @@ HloInstruction* HloComputation::AddInstructionInternal(
   if (dry_) {
     dry_new_instruction_iterators_[pinst] = dry_new_instructions_.insert(
         dry_new_instructions_.end(), std::move(instruction));
-  } else {
+  } else if (rewrite_) {
+    // TODO(ohcy) Do this in ReplaceUserWith? Or in set
+    rewrite_new_instruction_iterators_[pinst] =
+      rewrite_new_instructions_.insert(
+        rewrite_new_instructions_.end(), std::move(instruction)
+      );
+  }
+  else {
     instruction_iterators_[pinst] =
         instructions_.insert(instructions_.end(), std::move(instruction));
   }
@@ -1227,14 +1234,11 @@ void HloComputation::set_rewrite(bool value) {
   if (rewrite_ == value) {
     return;
   }
-  if (value == true) {
-    // turn on all the flags
-    rewrite_ = true;
+  else {
+    rewrite_ = value;
     for (HloInstruction* inst : instructions()) {
-      inst->set_rewrite(true);
+      inst->set_rewrite(value);
     }
-  } else {
-    return;
   }
 }
 
@@ -1663,5 +1667,36 @@ void HloComputation::RemoveDuplicateTupleOps() {
   Cleanup();
 }
 
+// Move a newly created instruction over to the computations instructions_
+// array once we apply its associated rewrite plan
+void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
+  auto inst_it = rewrite_new_instruction_iterators_.find(instruction);
+  instruction_iterators_[inst_it->first] =
+      instructions_.insert(instructions_.end(), std::move(*inst_it->second));
+
+  rewrite_new_instructions_.erase(inst_it->second);
+  rewrite_new_instruction_iterators_.erase(inst_it);
+}
+
+// TODO(ohcy): When do we want to call this? Do we want to leave rewrite plans
+// in-between calls to apply? Or clear everything. If it's the former, then
+// when we apply we should delete any other rewrite plans that have common
+// affected_edges
+//
+// Move any unused newly created instructions over to to_be_deleted
+// for deletion in Cleanup
+void HloComputation::RewriteCleanup() {
+  for (const auto &inst_it : rewrite_new_instruction_iterators_ ) {
+    HloInstruction* inst = (*(inst_it.second)).get();
+    inst->set_parent(nullptr);
+    inst->DetachFromOperandsAndUsers();
+    // Clear all operands to avoid Null operands.
+    inst->RemoveAllOperands();
+    inst->ClearCalledComputations();
+    inst->MarkAsDead();
+  }
+  rewrite_new_instructions_.clear();
+  rewrite_new_instruction_iterators_.clear();
+}
 
 }  // namespace xla

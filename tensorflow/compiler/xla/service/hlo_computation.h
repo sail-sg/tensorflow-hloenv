@@ -603,6 +603,9 @@ class HloComputation {
 
   bool HasCycle();
 
+  void AddRewriteInstruction(HloInstruction* instruction);
+  void RewriteCleanup();
+
  private:
   explicit HloComputation(
       const std::string& name, int parameter_count,
@@ -698,10 +701,15 @@ class HloComputation {
   bool dry_ = false;
   bool rewrite_ = false;
   InstructionList dry_new_instructions_;
+  InstructionList rewrite_new_instructions_;
+  HloInstructionSet applied_rewrite_instructions_;
+
   absl::flat_hash_map<const HloInstruction*, InstructionList::iterator>
       dry_new_instruction_iterators_;
-  HloInstructionMap<HloInstructionSet>
-      alternatives_;
+  absl::flat_hash_map<const HloInstruction*, InstructionList::iterator>
+      rewrite_new_instruction_iterators_;
+  HloInstructionMap<HloInstructionSet> alternatives_;
+
   absl::flat_hash_map<HloInstruction*, HloInstruction*> originals_;
 
   HloComputation(const HloComputation&) = delete;

@@ -2116,6 +2116,11 @@ class HloInstruction {
 
   // Old methods kept for smooth subclassing transition END.
 
+  // Returns the map of rewrite plans
+  const std::vector<Rewrite*>& rewrite_plans() const {
+    return rewrite_plans_;
+  }
+
  protected:
   // Internal constructor for a given opcode/shape, other fields must be filled
   // by factory methods.
@@ -2344,7 +2349,10 @@ class HloInstruction {
 
   bool dry_ = false;
   bool rewrite_ = false;
-  std::unordered_map<HloInstruction*, std::unique_ptr<Rewrite>> rewrite_plans_;
+
+  // Key is the new producer of the rewrite plan
+  std::unordered_map<HloInstruction*, std::unique_ptr<Rewrite>> rewrite_map_;
+  std::vector<Rewrite*> rewrite_plans_;
 
   HloInstruction(const HloInstruction&) = delete;
   HloInstruction& operator=(const HloInstruction&) = delete;
@@ -2405,6 +2413,34 @@ using HloInstructionSet = std::set<HloInstruction*, HloPtrComparator>;
 using ConstHloInstructionSet =
     std::set<const HloInstruction*, HloPtrComparator>;
 
+using HloInstructionPair = std::pair<HloInstruction*, HloInstruction*>;
+struct HloPtrPairComparator {
+  bool operator()(const HloInstructionPair& lhs,
+                  const HloInstructionPair& rhs) const;
+};
+using HloInstructionPairSet = std::set<HloInstructionPair, HloPtrPairComparator>;
+
+
+// TODOS (ohcy):
+// For pruning/applicability of rewrites after application of other rewrites:
+//   Need to enforce on client side using rewrite graph
+//   Also need to have check on TF side
+
+// After we apply rewrites, prune everything
+
+// Only compute rewrite when "all uses" are replaced
+//   Cannot just hook on ReplaceAllUsers, cos indiv ReplaceUser calls might do same thing
+//   Still need a rewrite plan, just that either:
+//     It replaces empty subgraph
+//     Replaces same subgraph, but affected nodes is calculated differently+
+
+// instructions_
+//   Need to remove when adding
+//   Add it back when applying
+//   see:
+//     HloInstruction* HloComputation::AddInstructionInternal(
+
+
 class Rewrite {
 
  private:
@@ -2421,7 +2457,9 @@ class Rewrite {
 
   HloInstructionSet rewrite_operands_;
   HloInstructionSet rewrite_users_;
-  HloInstructionSet affected_;
+  HloInstructionPairSet affected_edges_;
+
+  HloInstructionSet new_instructions_;
 
  public:
   Rewrite(HloInstruction* original, HloInstruction* replacement)
@@ -2431,6 +2469,26 @@ class Rewrite {
 
   void AddUser(HloInstruction* user) {
     rewrite_users_.insert(user);
+  }
+
+  HloInstruction* original() {
+    return original_;
+  }
+
+  HloInstruction* replacement() {
+    return replacement_;
+  }
+
+  const HloInstructionSet& users() const {
+    return rewrite_users_;
+  }
+
+  const HloInstructionSet& operands() const {
+    return rewrite_operands_;
+  }
+
+  const HloInstructionPairSet& affected_edges() const {
+    return affected_edges_;
   }
 
   // Given the original instruction and its replacement, compute the users,
