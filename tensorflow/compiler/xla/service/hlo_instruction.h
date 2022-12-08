@@ -1523,7 +1523,7 @@ class HloInstruction {
   void set_dry(bool value) { dry_ = value; }
 
   bool rewrite() const { return rewrite_; }
-  void set_rewrite(bool value) { rewrite_ = value; }
+  void set_rewrite(bool value);
 
   // Returns the sharding applied to this operator.
   // REQUIRES: has_sharding() is true.
@@ -2121,6 +2121,8 @@ class HloInstruction {
     return rewrite_plans_;
   }
 
+  void ApplyRewrite(HloInstruction* replacement);
+
  protected:
   // Internal constructor for a given opcode/shape, other fields must be filled
   // by factory methods.
@@ -2419,6 +2421,8 @@ struct HloPtrPairComparator {
                   const HloInstructionPair& rhs) const;
 };
 using HloInstructionPairSet = std::set<HloInstructionPair, HloPtrPairComparator>;
+template <typename ValueT>
+using HloInstructionPairMap = std::map<HloInstructionPair, ValueT, HloPtrPairComparator>;
 
 
 // TODOS (ohcy):
@@ -2464,7 +2468,6 @@ class Rewrite {
  public:
   Rewrite(HloInstruction* original, HloInstruction* replacement)
       : original_(original), replacement_(replacement)  {
-    ComputeRewrite();
   }
 
   void AddUser(HloInstruction* user) {
@@ -2499,7 +2502,7 @@ class Rewrite {
   void Apply();
 
   // Return whether or not the rewrite is still appliable
-  bool Applicable(HloComputation& comp);
+  bool Applicable();
 };
 
 

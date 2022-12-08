@@ -4843,11 +4843,29 @@ const CholeskyOptions& HloInstruction::cholesky_options() const {
   return Cast<HloCholeskyInstruction>(this)->cholesky_options();
 }
 
+void HloInstruction::set_rewrite(bool value) {
+  rewrite_ = value;
+  std::cout << "set_rewrite: " << rewrite_ << std::endl;
+  if (rewrite_ == false) {
+    for (auto* rewrite : rewrite_plans_) {
+      rewrite->ComputeRewrite();
+    }
+  }
+}
+
+void HloInstruction::ApplyRewrite(HloInstruction* replacement) {
+  Rewrite* rewrite_plan = rewrite_map_[replacement].get();
+  if (rewrite_plan->Applicable()) {
+    rewrite_plan->Apply();
+    rewrite_map_.clear();
+    rewrite_plans_.clear();
+  }
+  else {
+    LOG(FATAL) << "Rewrite cannot be applied!";
+  }
+}
 
 void Rewrite::ComputeRewrite() {
-
-  CHECK(original_->parent()->rewrite());
-
   affected_edges_.clear();
   rewrite_operands_.clear();
 
@@ -4979,7 +4997,7 @@ void Rewrite::Apply() {
   }
 }
 
-bool Rewrite::Applicable(HloComputation& comp) {
+bool Rewrite::Applicable() {
   if (original_->IsDead() || replacement_->IsDead()) {
     return false;
   }

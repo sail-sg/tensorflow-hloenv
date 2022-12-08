@@ -928,12 +928,12 @@ void HloModule::SetRewrite(bool rewrite_mode) {
       computation->set_rewrite(rewrite_mode);
     }
     rewrite_mode_ = rewrite_mode;
-    // Remove unused computations that might been orphaned during the
-    // set rewrite_off processes (e.g. alternatives deleted due to generating
-    // a cycle)
-    if (!rewrite_mode_) {
-      RemoveUnusedComputations();
-    }
+    // // Remove unused computations that might been orphaned during the
+    // // set rewrite_off processes (e.g. alternatives deleted due to generating
+    // // a cycle)
+    // if (!rewrite_mode_) {
+    //   RemoveUnusedComputations();
+    // }
   }
 }
 
