@@ -1671,11 +1671,13 @@ void HloComputation::RemoveDuplicateTupleOps() {
 // array once we apply its associated rewrite plan
 void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
   auto inst_it = rewrite_new_instruction_iterators_.find(instruction);
-  instruction_iterators_[inst_it->first] =
-      instructions_.insert(instructions_.end(), std::move(*inst_it->second));
 
-  rewrite_new_instructions_.erase(inst_it->second);
-  rewrite_new_instruction_iterators_.erase(inst_it);
+  // Only insert if we are seeing it for the first time, since multiple rewrites
+  // can point to the same newly created instructions (e.g. multi output fusion)
+  if (!instruction_iterators_.contains(inst_it->first)) {
+    instruction_iterators_[inst_it->first] =
+        instructions_.insert(instructions_.end(), std::move(*inst_it->second));
+  }
 }
 
 // TODO(ohcy): When do we want to call this? Do we want to leave rewrite plans
@@ -1688,12 +1690,24 @@ void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
 void HloComputation::RewriteCleanup() {
   for (const auto &inst_it : rewrite_new_instruction_iterators_ ) {
     HloInstruction* inst = (*(inst_it.second)).get();
-    inst->set_parent(nullptr);
-    inst->DetachFromOperandsAndUsers();
-    // Clear all operands to avoid Null operands.
-    inst->RemoveAllOperands();
-    inst->ClearCalledComputations();
+
+    // if inst == nullptr, it means this newly created instruction was added
+    // as a result of the rewrite being applied, so it's no longer held in
+    // rewrite_new_instruction_iterators_
+    if (inst != nullptr) {
     inst->MarkAsDead();
+      inst->set_parent(nullptr);
+      inst->DetachFromOperandsAndUsers();
+      // Clear all operands to avoid Null operands.
+      inst->RemoveAllOperands();
+      inst->ClearCalledComputations();
+      inst->MarkAsDead();
+    }
+  }
+
+  for (HloInstruction* inst : instructions()) {
+    //TEMPLOG(OHCY)std::cout << inst->name() << "CLEAN" << std::endl;
+    inst->RewriteCleanup();
   }
   rewrite_new_instructions_.clear();
   rewrite_new_instruction_iterators_.clear();

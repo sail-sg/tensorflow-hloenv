@@ -4853,17 +4853,17 @@ void HloInstruction::set_rewrite(bool value) {
   }
 }
 
-void HloInstruction::ApplyRewrite(HloInstruction* replacement) {
-  Rewrite* rewrite_plan = rewrite_map_[replacement].get();
-  if (rewrite_plan->Applicable()) {
-    rewrite_plan->Apply();
-    rewrite_map_.clear();
-    rewrite_plans_.clear();
-  }
-  else {
-    LOG(FATAL) << "Rewrite cannot be applied!";
-  }
-}
+// void HloInstruction::ApplyRewrite(HloInstruction* replacement) {
+//   Rewrite* rewrite_plan = rewrite_map_[replacement].get();
+//   if (rewrite_plan->Applicable()) {
+//     rewrite_plan->Apply();
+//     rewrite_map_.clear();
+//     rewrite_plans_.clear();
+//   }
+//   else {
+//     LOG(FATAL) << "Rewrite cannot be applied!";
+//   }
+// }
 
 void Rewrite::ComputeRewrite() {
   affected_edges_.clear();
@@ -4973,8 +4973,9 @@ void Rewrite::ComputeRewrite() {
 
     // If this node has no users outside of the rewrite pattern, and it is not
     // one of the rewrite operands, continue processing its children
-    if (!has_other_user &&
-        rewrite_operands_.find(current) == rewrite_operands_.end()) {
+    // if (!has_other_user &&
+    //     rewrite_operands_.find(current) == rewrite_operands_.end()) {
+    if (rewrite_operands_.find(current) == rewrite_operands_.end()) {
       user_set.insert(current);
       for (auto* operand : current->operands()) {
         dfs_stack.push_back(operand);
@@ -4984,28 +4985,33 @@ void Rewrite::ComputeRewrite() {
   // TODO(ohcy) do we need to add channel dependencies and control predecessors?
 }
 
-void Rewrite::Apply() {
-  original_->parent()->set_rewrite(false);
-  // Note that we cannot just call ReplaceAllUsesWith because sometimes the
-  // user replacement is done only for selective users
-  for (auto* user : rewrite_users_) {
-    original_->ReplaceUseWith(user, replacement_);
-  }
+bool Rewrite::Apply() {
+  if (this->Applicable()) {
+    // Note that we cannot just call ReplaceAllUsesWith because sometimes the
+    // user replacement is done only for selective users
+    for (auto* user : rewrite_users_) {
+      original_->ReplaceUseWith(user, replacement_);
+    }
+    for (auto* instr : new_instructions_) {
+      original_->parent()->AddRewriteInstruction(instr);
+    }
 
-  for (auto* instr : new_instructions_) {
-    original_->parent()->AddRewriteInstruction(instr);
+    return true;
+  }
+  else {
+    return false;
   }
 }
 
 bool Rewrite::Applicable() {
-  if (original_->IsDead() || replacement_->IsDead()) {
+  if (original_->IsDead()) {
     return false;
   }
-  for (auto* operand : rewrite_operands_) {
-    if (operand->IsDead()) {
-      return false;
-    }
-  }
+  // for (auto* operand : rewrite_operands_) {
+  //   if (operand->IsDead()) {
+  //     return false;
+  //   }
+  // }
   return true;
 }
 

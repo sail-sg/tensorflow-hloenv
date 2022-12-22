@@ -2121,7 +2121,10 @@ class HloInstruction {
     return rewrite_plans_;
   }
 
-  void ApplyRewrite(HloInstruction* replacement);
+  void RewriteCleanup() {
+    rewrite_plans_.clear();
+    rewrite_map_.clear();
+  }
 
  protected:
   // Internal constructor for a given opcode/shape, other fields must be filled
@@ -2498,8 +2501,9 @@ class Rewrite {
   // operands and affected instructions of this rewrite
   void ComputeRewrite();
 
-  // Apply the rewrite
-  void Apply();
+  // Apply the rewrite, returns whether or not the rewrite was applied
+  // successfully
+  bool Apply();
 
   // Return whether or not the rewrite is still appliable
   bool Applicable();

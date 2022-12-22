@@ -298,7 +298,7 @@ void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
         users.reserve(to_replace->user_count());
         if (for_producer) {
           for (auto* u : to_replace->users()) {
-            if (u != consumer && u->dry()) {
+            if (u != consumer && (u->dry() || u->rewrite())) {
               users.push_back(u);
               LOG(ERROR) << "inst: " << inst->name() << " user " << u->name();
             }
@@ -318,7 +318,7 @@ void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
           std::vector<HloInstruction*> users;
           std::copy_if(to_replace->users().begin(), to_replace->users().end(),
                        std::back_inserter(users),
-                       [](HloInstruction* inst) { return inst->dry(); });
+                       [](HloInstruction* inst) { return inst->dry() || inst->rewrite(); });
           replace_users[inst][to_replace] = users;
         }
       };
@@ -332,7 +332,7 @@ void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
       if (IsTuple(root)) {
         std::vector<bool> not_seen(root->mutable_operands().size(), true);
         for (auto* gte : inst->users()) {
-          if (!gte->dry()) {
+          if (!gte->dry() || !gte->rewrite()) {
             continue;
           }
           auto* key = root->mutable_operand(gte->tuple_index());
