@@ -1110,7 +1110,6 @@ std::unique_ptr<HloComputation> HloComputation::CloneWithReplacements(
   }
   if (new_root == nullptr) {
     new_root = root_instruction();
-    std::cout << "ROOT INSTR IS: " << new_root->name() << std::endl;
   }
 
   // Look up instr in the replacements map, and return either the replacement,
@@ -1181,7 +1180,6 @@ std::unique_ptr<HloComputation> HloComputation::CloneWithReplacements(
       CHECK_NE(replaced_operand, nullptr)
           << "replacements map tried to eliminate a used instruction "
           << operand->ToString() << ", used by " << instr->ToString();
-      std::cout << replaced_operand << ":1: " << replaced_operand->name() << std::endl;
       new_operands.push_back(context->GetInstruction(replaced_operand));
     }
     std::unique_ptr<HloInstruction> new_instr =
@@ -1198,10 +1196,8 @@ std::unique_ptr<HloComputation> HloComputation::CloneWithReplacements(
     builder.AddInstruction(std::move(instr));
   }
 
-  std::cout << new_root << ":2: " << new_root->name() << std::endl;
   auto result = builder.Build(
       /*root_instruction=*/context->GetInstruction(replace(new_root)));
-  std::cout << new_root << ":3: " << new_root->name() << std::endl;
 
   // Clone control dependencies.
   for (auto instr : postorder) {
@@ -1211,15 +1207,12 @@ std::unique_ptr<HloComputation> HloComputation::CloneWithReplacements(
       // successor may not have been remapped, because it might have been
       // removed by the replacements map.
       if (replaced_successor != nullptr) {
-        std::cout << replaced_successor << ":3: " << replaced_successor->name() << std::endl;
         TF_CHECK_OK(new_instr->AddControlDependencyTo(
             context->GetInstruction(replaced_successor)));
       }
     }
   }
-  std::cout << "AAAAA" << std::endl;
   context->MapComputation(this, result.get());
-  std::cout << "BBBBB" << std::endl;
 
   return result;
 }
@@ -1710,36 +1703,27 @@ void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
 // for deletion in Cleanup
 void HloComputation::RewriteCleanup() {
   for (const auto &inst_it : rewrite_new_instruction_iterators_ ) {
-    //TEMPLOG(OHCY)std::cout << "-----" << std::endl;
-    //TEMPLOG(OHCY)std::cout << inst_it.first->name() << std::endl;
     HloInstruction* inst = (*(inst_it.second)).get();
 
     // if inst == nullptr, it means this newly created instruction was added
     // as a result of the rewrite being applied, so it's no longer held in
     // rewrite_new_instruction_iterators_
     if (inst != nullptr) {
-      //TEMPLOG(OHCY)std::cout << inst << std::endl;
-      //TEMPLOG(OHCY)std::cout << inst->name() << std::endl;
       inst->set_parent(nullptr);
       inst->DetachFromOperandsAndUsers();
       // Clear all operands to avoid Null operands.
       inst->RemoveAllOperands();
       inst->ClearCalledComputations();
       inst->MarkAsDead();
-      //TEMPLOG(OHCY)std::cout << inst->name() << "DONE" << std::endl;
     }
   }
 
   for (HloInstruction* inst : instructions()) {
-    //TEMPLOG(OHCY)std::cout << inst->name() << "CLEAN" << std::endl;
     inst->RewriteCleanup();
   }
 
-  //TEMPLOG(OHCY)std::cout << "CLEARING 1" << std::endl;
   rewrite_new_instructions_.clear();
-  //TEMPLOG(OHCY)std::cout << "CLEARING 2" << std::endl;
   rewrite_new_instruction_iterators_.clear();
-  //TEMPLOG(OHCY)std::cout << "DONE" << std::endl;
 }
 
 }  // namespace xla

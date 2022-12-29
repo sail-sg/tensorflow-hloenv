@@ -2622,7 +2622,6 @@ Status HloInstruction::ReplaceUseWithDifferentShape(
   VLOG(3) << "Replacing uses of " << name() << " in " << user->name()
           << " with " << new_producer->name();
 
-  //TEMPLOG(OHCY)std::cout << "Replacing uses of " << name() << " in " << user->name() << " with " << new_producer->name() << std::endl;
   if (rewrite_) {
     this->CreateRewrite(new_producer);
     // TODO(ohcy): Do we want to differentiate calls to this vs single calls
@@ -4852,7 +4851,6 @@ const CholeskyOptions& HloInstruction::cholesky_options() const {
 
 void HloInstruction::set_rewrite(bool value) {
   rewrite_ = value;
-  //TEMPLOG(OHCY)std::cout << "set_rewrite: " << rewrite_ << std::endl;
   if (rewrite_ == false) {
     for (auto* rewrite : rewrite_plans_) {
       rewrite->ComputeRewrite();
@@ -5000,7 +4998,6 @@ bool Rewrite::Apply() {
       original_->ReplaceUseWith(user, replacement_);
     }
     for (auto* instr : new_instructions_) {
-      //TEMPLOG(OHCY)std::cout << "Adding new instruction: " << instr->name() << std::endl;
       original_->parent()->AddRewriteInstruction(instr);
     }
     if (original_->parent()->root_instruction() == original_) {

@@ -209,13 +209,9 @@ class HloModule {
 
   // Deallocate unused RewriteInstructions and delete rewrite plans
   void RewriteCleanup() {
-    //TEMPLOG(OHCY)std::cout << "Module cleanup start" << std::endl;
     for (auto& comp : computations_) {
-      //TEMPLOG(OHCY)std::cout << "comp cleanup start: " << comp->name() << std::endl;
       comp->RewriteCleanup();
-      //TEMPLOG(OHCY)std::cout << "comp cleanup done" << std::endl;
     }
-    //TEMPLOG(OHCY)std::cout << "Module cleanup done" << std::endl;
   }
 
   // Deallocate removed instructions in each computation.
