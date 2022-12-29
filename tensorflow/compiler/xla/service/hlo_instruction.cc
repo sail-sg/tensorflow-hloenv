@@ -2609,16 +2609,22 @@ Status HloInstruction::ReplaceUseWith(HloInstruction* user,
   return ReplaceUseWithDifferentShape(user, new_producer);
 }
 
+void HloInstruction::CreateRewrite(HloInstruction* replacement) {
+    if (rewrite_map_.find(replacement) == rewrite_map_.end()) {
+      rewrite_map_[replacement] = std::make_unique<Rewrite>(this, replacement);
+      rewrite_plans_.push_back(rewrite_map_[replacement].get());
+    }
+    return;
+}
+
 Status HloInstruction::ReplaceUseWithDifferentShape(
     HloInstruction* user, HloInstruction* new_producer) {
   VLOG(3) << "Replacing uses of " << name() << " in " << user->name()
           << " with " << new_producer->name();
 
+  //TEMPLOG(OHCY)std::cout << "Replacing uses of " << name() << " in " << user->name() << " with " << new_producer->name() << std::endl;
   if (rewrite_) {
-    if (rewrite_map_.find(new_producer) == rewrite_map_.end()) {
-      rewrite_map_[new_producer] = std::make_unique<Rewrite>(this, new_producer);
-      rewrite_plans_.push_back(rewrite_map_[new_producer].get());
-    }
+    this->CreateRewrite(new_producer);
     // TODO(ohcy): Do we want to differentiate calls to this vs single calls
     // to replaceUseWith? E.g. for single calls, we have one rewrite plan per
     // user, even if the replacement instr is the same.
@@ -2634,16 +2640,17 @@ Status HloInstruction::ReplaceUseWithDifferentShape(
   }
 
   RemoveUser(user);
-
   TF_RET_CHECK(absl::c_count(user->operands_, this) >= 0);
   std::replace(user->operands_.begin(), user->operands_.end(), this,
                new_producer);
   new_producer->AddUser(user);
+
   // Custom fusions may not be able to handle deduplicated operands.
   if (user->opcode() == HloOpcode::kFusion) {
     TF_RETURN_IF_ERROR(
         Cast<HloFusionInstruction>(user)->DeduplicateFusionOperands());
   }
+
   return Status::OK();
 }
 
@@ -4845,7 +4852,7 @@ const CholeskyOptions& HloInstruction::cholesky_options() const {
 
 void HloInstruction::set_rewrite(bool value) {
   rewrite_ = value;
-  std::cout << "set_rewrite: " << rewrite_ << std::endl;
+  //TEMPLOG(OHCY)std::cout << "set_rewrite: " << rewrite_ << std::endl;
   if (rewrite_ == false) {
     for (auto* rewrite : rewrite_plans_) {
       rewrite->ComputeRewrite();
@@ -4961,14 +4968,14 @@ void Rewrite::ComputeRewrite() {
 
     // Whether or not a node has a user that's not in the rewrite pattern
     // replacement
-    bool has_other_user = false;
+    // bool has_other_user = false;
     for (auto& user : current->users()) {
       if (user_set.find(user) != user_set.end()) {
         affected_edges_.insert(std::make_pair(current, user));
       }
-      else {
-        has_other_user = true;
-      }
+      // else {
+      //   has_other_user = true;
+      // }
     }
 
     // If this node has no users outside of the rewrite pattern, and it is not
@@ -4993,9 +5000,12 @@ bool Rewrite::Apply() {
       original_->ReplaceUseWith(user, replacement_);
     }
     for (auto* instr : new_instructions_) {
+      //TEMPLOG(OHCY)std::cout << "Adding new instruction: " << instr->name() << std::endl;
       original_->parent()->AddRewriteInstruction(instr);
     }
-
+    if (original_->parent()->root_instruction() == original_) {
+      original_->parent()->set_root_instruction(replacement_);
+    }
     return true;
   }
   else {

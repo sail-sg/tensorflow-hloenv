@@ -2126,6 +2126,8 @@ class HloInstruction {
     rewrite_map_.clear();
   }
 
+  void CreateRewrite(HloInstruction* replacement);
+
  protected:
   // Internal constructor for a given opcode/shape, other fields must be filled
   // by factory methods.

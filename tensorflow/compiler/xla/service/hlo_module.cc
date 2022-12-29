@@ -849,21 +849,30 @@ std::unique_ptr<HloModule> HloModule::Clone(const HloModuleConfig& config,
 }
 
 Status HloModule::RemoveUnusedComputations() {
+  std::cout << "A0" << std::endl;
   std::string suffix = "tmp";
+
   auto module = absl::make_unique<HloModule>(
       absl::StrCat(name_, suffix.empty() ? "" : "-", suffix), config());
+  std::cout << "A1" << std::endl;
   HloCloneContext context(module.get(), suffix);
+  std::cout << "A2" << std::endl;
   entry_computation_->Clone(suffix, &context);
+  std::cout << "A3" << std::endl;
   std::vector<HloComputation*> to_remove;
   for (auto computation : computations()) {
+    std::cout << computation << ": " << computation->name() << std::endl;
     auto found_computation = context.FindComputation(computation);
+    std::cout << "FOUND" << std::endl;
     if (found_computation == nullptr) {
       to_remove.push_back(computation);
     }
   }
+  std::cout << "B" << std::endl;
   for (auto computation : to_remove) {
     TF_RETURN_IF_ERROR(RemoveEmbeddedComputation(computation));
   }
+  std::cout << "C" << std::endl;
   return Status::OK();
 }
 
@@ -901,10 +910,13 @@ uint64_t HloModule::CalledComputationHash() const {
 
 void HloModule::Prune() {
   auto computations = MakeComputationPostOrder();
+  std::cout << "AA" << std::endl;
   for (auto* computation : computations) {
     computation->Prune();
   }
+  std::cout << "BB" << std::endl;
   RemoveUnusedComputations();
+  std::cout << "CC" << std::endl;
 }
 
 void HloModule::SetDry(bool dry_mode) {
