@@ -1249,10 +1249,19 @@ void HloComputation::set_rewrite(bool value) {
     return;
   }
   else {
-    rewrite_ = value;
+    if (value == false) {
+      // We must make sure to compute the rewrites before setting rewrite to
+      // false, since we utilize that to determine whether an instruction
+      // is a newly created one.
+      for (HloInstruction* inst : instructions()) {
+        inst->compute_rewrites();
+      }
+    }
+
     for (HloInstruction* inst : instructions()) {
       inst->set_rewrite(value);
     }
+    rewrite_ = value;
   }
 }
 
@@ -1686,11 +1695,13 @@ void HloComputation::RemoveDuplicateTupleOps() {
 void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
   auto inst_it = rewrite_new_instruction_iterators_.find(instruction);
 
-  // Only insert if we are seeing it for the first time, since multiple rewrites
-  // can point to the same newly created instructions (e.g. multi output fusion)
-  if (!instruction_iterators_.contains(inst_it->first)) {
-    instruction_iterators_[inst_it->first] =
-        instructions_.insert(instructions_.end(), std::move(*inst_it->second));
+  if (inst_it != rewrite_new_instruction_iterators_.end()) {
+    // Only insert if we are seeing it for the first time, since multiple rewrites
+    // can point to the same newly created instructions (e.g. multi output fusion)
+    if (!instruction_iterators_.contains(inst_it->first)) {
+      instruction_iterators_[inst_it->first] =
+          instructions_.insert(instructions_.end(), std::move(*inst_it->second));
+    }
   }
 }
 

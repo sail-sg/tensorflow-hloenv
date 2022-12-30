@@ -1524,6 +1524,7 @@ class HloInstruction {
 
   bool rewrite() const { return rewrite_; }
   void set_rewrite(bool value);
+  void compute_rewrites();
 
   // Returns the sharding applied to this operator.
   // REQUIRES: has_sharding() is true.

@@ -2381,6 +2381,9 @@ void HloInstruction::RemoveOperandsAtAscendingIndices(
   if (dry_) {
     return;
   }
+  if (rewrite_) {
+    return;
+  }
 
   if (ascending_indices.empty()) {
     return;
@@ -2582,6 +2585,9 @@ void HloInstruction::RemoveUser(HloInstruction* user) {
   if (dry_ && user->dry()) {
     return;
   }
+  if (rewrite_ && user->rewrite()) {
+    return;
+  }
 
   auto map_it = user_map_.find(user);
   CHECK(map_it != user_map_.end());
@@ -2677,6 +2683,12 @@ Status HloInstruction::ReplaceOperandWithDifferentShape(
     return Status::OK();
   }
 
+  if (rewrite_) {
+    old_operand->CreateRewrite(new_operand);
+    rewrite_map_[new_operand]->AddUser(this);
+    return Status::OK();
+  }
+
   operands_[operand_num] = new_operand;
 
   VLOG(3) << "Replacing operand " << operand_num << " of " << name() << " with "
@@ -2726,6 +2738,18 @@ Status HloInstruction::ReplaceAllUsesWithDifferentShape(
 
   if (dry_) {
     parent_->RecordAlternatives(this, new_producer);
+    return Status::OK();
+  }
+  if (rewrite_) {
+    this->CreateRewrite(new_producer);
+    // TODO(ohcy): Do we want to differentiate calls to this vs single calls
+    // to replaceUseWith? E.g. for single calls, we have one rewrite plan per
+    // user, even if the replacement instr is the same.
+    // Currently here we just always add to the user set for a replacement inst
+    // Same comment as above.
+    for (HloInstruction* user : users()) {
+      rewrite_map_[new_producer]->AddUser(user);
+    }
     return Status::OK();
   }
 
@@ -4851,10 +4875,11 @@ const CholeskyOptions& HloInstruction::cholesky_options() const {
 
 void HloInstruction::set_rewrite(bool value) {
   rewrite_ = value;
-  if (rewrite_ == false) {
-    for (auto* rewrite : rewrite_plans_) {
-      rewrite->ComputeRewrite();
-    }
+}
+
+void HloInstruction::compute_rewrites() {
+  for (auto* rewrite : rewrite_plans_) {
+    rewrite->ComputeRewrite();
   }
 }
 
@@ -4997,6 +5022,14 @@ bool Rewrite::Apply() {
     for (auto* user : rewrite_users_) {
       original_->ReplaceUseWith(user, replacement_);
     }
+    // Cycle detected, cancel application of rewrite
+    if (original_->parent()->HasCycle()) {
+      for (auto* user : rewrite_users_) {
+        replacement_->ReplaceUseWith(user, original_);
+      }
+      return false;
+    }
+
     for (auto* instr : new_instructions_) {
       original_->parent()->AddRewriteInstruction(instr);
     }
