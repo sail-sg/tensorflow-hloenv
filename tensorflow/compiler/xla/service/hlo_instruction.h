@@ -2471,9 +2471,13 @@ class Rewrite {
 
   HloInstructionSet new_instructions_;
 
+  std::string pass_name_;
+  bool applicable_ = true;
+
  public:
-  Rewrite(HloInstruction* original, HloInstruction* replacement)
-      : original_(original), replacement_(replacement)  {
+  Rewrite(HloInstruction* original, HloInstruction* replacement,
+          const std::string& pass_name)
+      : original_(original), replacement_(replacement), pass_name_(pass_name) {
   }
 
   void AddUser(HloInstruction* user) {
@@ -2500,6 +2504,8 @@ class Rewrite {
     return affected_edges_;
   }
 
+  const std::string& pass_name() const { return pass_name_; }
+
   // Given the original instruction and its replacement, compute the users,
   // operands and affected instructions of this rewrite
   void ComputeRewrite();
@@ -2510,6 +2516,7 @@ class Rewrite {
 
   // Return whether or not the rewrite is still appliable
   bool Applicable();
+  void SetApplicable(bool applicable) { applicable_ = applicable; }
 };
 
 

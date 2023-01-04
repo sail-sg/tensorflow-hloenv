@@ -2617,7 +2617,9 @@ Status HloInstruction::ReplaceUseWith(HloInstruction* user,
 
 void HloInstruction::CreateRewrite(HloInstruction* replacement) {
     if (rewrite_map_.find(replacement) == rewrite_map_.end()) {
-      rewrite_map_[replacement] = std::make_unique<Rewrite>(this, replacement);
+      rewrite_map_[replacement] =
+        std::make_unique<Rewrite>(this, replacement,
+                                  this->parent()->parent()->pass_name());
       rewrite_plans_.push_back(rewrite_map_[replacement].get());
     }
     return;
@@ -5027,6 +5029,7 @@ bool Rewrite::Apply() {
       for (auto* user : rewrite_users_) {
         replacement_->ReplaceUseWith(user, original_);
       }
+      std::cout << "Cycle detected after Rewrite Application! Rolling back" << std::endl;
       return false;
     }
 
@@ -5052,7 +5055,7 @@ bool Rewrite::Applicable() {
   //     return false;
   //   }
   // }
-  return true;
+  return applicable_;
 }
 
 }  // namespace xla

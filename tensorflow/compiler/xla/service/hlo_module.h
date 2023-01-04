@@ -227,6 +227,10 @@ class HloModule {
 
   void SetRewrite(bool rewrite_mode);
 
+  void SetCurrentPassName(absl::string_view pass_name) {
+    pass_name_ = std::string(pass_name);
+  }
+
   // Compute and return a post order of all computations in the module. The sort
   // is defined like so: if computation A has an instruction which calls
   // computation B, then A will appear after B in the sort.
@@ -464,6 +468,7 @@ class HloModule {
 
   bool dry_mode() const { return dry_mode_; }
   bool rewrite_mode() const { return rewrite_mode_; }
+  const std::string& pass_name() const { return pass_name_; }
 
   void set_relative_speedup(double relative_speedup) {
     relative_speedup_ = relative_speedup;
@@ -551,6 +556,8 @@ class HloModule {
   bool dry_mode_ = false;
   // Whether or not the module is currently in rewrite_mode
   bool rewrite_mode_ = false;
+  // Pass name of the current pass the is operating on this module
+  std::string pass_name_;
 };
 
 }  // namespace xla
