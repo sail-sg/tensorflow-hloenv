@@ -469,6 +469,7 @@ class HloModule {
   bool dry_mode() const { return dry_mode_; }
   bool rewrite_mode() const { return rewrite_mode_; }
   const std::string& pass_name() const { return pass_name_; }
+  int get_rewrite_idx() { return curr_rewrite_idx_++; }
 
   void set_relative_speedup(double relative_speedup) {
     relative_speedup_ = relative_speedup;
@@ -558,6 +559,8 @@ class HloModule {
   bool rewrite_mode_ = false;
   // Pass name of the current pass the is operating on this module
   std::string pass_name_;
+  // Current rewrite idx, used to keep track of rewrite creation ordering
+  int curr_rewrite_idx_;
 };
 
 }  // namespace xla

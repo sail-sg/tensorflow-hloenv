@@ -925,6 +925,11 @@ void HloModule::SetDry(bool dry_mode) {
 
 void HloModule::SetRewrite(bool rewrite_mode) {
   if (rewrite_mode != rewrite_mode_) {
+
+    if (rewrite_mode) {
+      curr_rewrite_idx_ = 0;
+    }
+
     for (xla::HloComputation* computation : MakeNonfusionComputations()) {
       computation->set_rewrite(rewrite_mode);
     }

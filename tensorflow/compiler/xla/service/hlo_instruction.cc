@@ -2619,7 +2619,8 @@ void HloInstruction::CreateRewrite(HloInstruction* replacement) {
     if (rewrite_map_.find(replacement) == rewrite_map_.end()) {
       rewrite_map_[replacement] =
         std::make_unique<Rewrite>(this, replacement,
-                                  this->parent()->parent()->pass_name());
+                                  this->parent()->parent()->pass_name(),
+                                  this->parent()->parent()->get_rewrite_idx());
       rewrite_plans_.push_back(rewrite_map_[replacement].get());
     }
     return;

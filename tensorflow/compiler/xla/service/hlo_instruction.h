@@ -2474,10 +2474,13 @@ class Rewrite {
   std::string pass_name_;
   bool applicable_ = true;
 
+  int idx_;
+
  public:
   Rewrite(HloInstruction* original, HloInstruction* replacement,
-          const std::string& pass_name)
-      : original_(original), replacement_(replacement), pass_name_(pass_name) {
+          const std::string& pass_name, int idx)
+      : original_(original), replacement_(replacement),
+        pass_name_(pass_name), idx_(idx) {
   }
 
   void AddUser(HloInstruction* user) {
@@ -2505,6 +2508,8 @@ class Rewrite {
   }
 
   const std::string& pass_name() const { return pass_name_; }
+
+  const int rewrite_idx() const { return idx_; }
 
   // Given the original instruction and its replacement, compute the users,
   // operands and affected instructions of this rewrite
