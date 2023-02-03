@@ -1288,7 +1288,7 @@ void HloComputation::set_dry(bool value) {
     // check the number of new instructions
     int num = dry_new_instructions_.size();
     if (num > 0) {
-      LOG(ERROR) << num << " instructions added in dry mode, original ("
+      LOG(INFO) << num << " instructions added in dry mode, original ("
                  << instruction_count() << ")";
     }
     // append dry mode added instructions to this computation
@@ -1383,12 +1383,11 @@ void HloComputation::Prune() {
     }
     for (auto inst : to_delete) {
       if (inst->opcode() != xla::HloOpcode::kParameter) {
-        LOG(ERROR) << "Removing side branch at " << inst->name();
+        LOG(INFO) << "Removing side branch at " << inst->name();
         RemoveInstructionAndUnusedOperands(inst);
       }
     }
   }
-  LOG(ERROR) << instruction_count() << " instructions remaining.";
   Cleanup();
 }
 
@@ -1720,12 +1719,16 @@ void HloComputation::RewriteCleanup() {
     // as a result of the rewrite being applied, so it's no longer held in
     // rewrite_new_instruction_iterators_
     if (inst != nullptr) {
+      LOG(INFO) << "Deleting: " << inst->name();
       inst->set_parent(nullptr);
       inst->DetachFromOperandsAndUsers();
       // Clear all operands to avoid Null operands.
       inst->RemoveAllOperands();
       inst->ClearCalledComputations();
       inst->MarkAsDead();
+    }
+    else {
+      LOG(INFO) << "Already added: " << inst_it.first->name();
     }
   }
 

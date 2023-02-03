@@ -215,6 +215,8 @@ void FuseTwoSiblings(HloInstruction* left_sibling, HloInstruction* right_sibling
           root->shape(), fusion_kind,
           uniq_extern_operands, comp));
 
+  LOG(INFO) << "Sibling Fused into new fusion: " << fusion->name();
+
   for (int i = 0; i < tuple_operands.size(); ++i) {
     auto* tuple_operand = tuple_operands[i];
 
@@ -449,6 +451,7 @@ void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
       consumer->parent()->AddInstruction(HloInstruction::CreateFusion(
           root->shape(), ChooseFusionKind(*producer, *consumer),
           kfusion_operands, comp));
+  LOG(INFO) << "Fused into new fusion: " << fusion->name();
 
   for (int i = 0; i < new_fused_root.size(); ++i) {
     auto* inst = new_fused_root[i];
