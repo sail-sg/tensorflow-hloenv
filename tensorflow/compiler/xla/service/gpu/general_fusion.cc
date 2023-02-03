@@ -334,7 +334,7 @@ void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
       if (IsTuple(root)) {
         std::vector<bool> not_seen(root->mutable_operands().size(), true);
         for (auto* gte : inst->users()) {
-          if (!gte->dry() || !gte->rewrite()) {
+          if (!(gte->dry() || gte->rewrite())) {
             continue;
           }
           auto* key = root->mutable_operand(gte->tuple_index());
@@ -662,7 +662,7 @@ bool GeneralFusion::DoGeneralFusion(HloComputation* comp) {
     HloInstruction* inst = post_order.back();
     post_order.pop_back();
 
-    if (!(inst->dry())) {
+    if (!(inst->dry() || inst->rewrite())) {
       continue;
     }
 
@@ -676,13 +676,13 @@ bool GeneralFusion::DoGeneralFusion(HloComputation* comp) {
         // If GTE, trace back one more step
         if (user->users().size() > 0) {
           HloInstruction* actual_sibling = user->users()[0];
-          if (actual_sibling->dry()) {
+          if (actual_sibling->dry() || actual_sibling->rewrite()) {
             siblings.push_back(actual_sibling);
           }
         }
       } else {
         LOG(INFO) << "Collecting siblings: normal user " << user->name();
-        if (user->dry()) {
+        if (user->dry() || user->rewrite()) {
           siblings.push_back(user);
         }
       }
@@ -693,8 +693,8 @@ bool GeneralFusion::DoGeneralFusion(HloComputation* comp) {
         HloInstruction* left = *i;
         HloInstruction* right = *j;
 
-        CHECK(left->dry());
-        CHECK(right->dry());
+        CHECK(left->dry() || left->rewrite());
+        CHECK(right->dry() || right->rewrite());
 
         LOG(INFO) << "Considering " << left->name() << " and " << right->name();
         if (reachability_->IsConnected(left, right) || 
