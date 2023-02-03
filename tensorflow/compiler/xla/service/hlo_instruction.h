@@ -2509,7 +2509,7 @@ class Rewrite {
 
   const std::string& pass_name() const { return pass_name_; }
 
-  const int rewrite_idx() const { return idx_; }
+  const int create_order() const { return idx_; }
 
   // Given the original instruction and its replacement, compute the users,
   // operands and affected instructions of this rewrite
