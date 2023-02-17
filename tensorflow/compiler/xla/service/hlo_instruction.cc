@@ -5019,8 +5019,14 @@ void Rewrite::ComputeRewrite() {
   // TODO(ohcy) do we need to add channel dependencies and control predecessors?
 }
 
-bool Rewrite::Apply() {
-  if (this->Applicable()) {
+RewriteStatus Rewrite::Apply() {
+  if (original_->IsDead()) {
+    return RewriteStatus::ORIG_INST_DELETED;
+  }
+  else if (applied_) {
+    return RewriteStatus::ALREADY_APPLIED;
+  }
+  else {
     // Note that we cannot just call ReplaceAllUsesWith because sometimes the
     // user replacement is done only for selective users
     for (auto* user : rewrite_users_) {
@@ -5032,7 +5038,7 @@ bool Rewrite::Apply() {
         replacement_->ReplaceUseWith(user, original_);
       }
       std::cout << "Cycle detected after Rewrite Application! Rolling back" << std::endl;
-      return false;
+      return RewriteStatus::CYCLE;
     }
 
     for (auto* instr : new_instructions_) {
@@ -5041,23 +5047,9 @@ bool Rewrite::Apply() {
     if (original_->parent()->root_instruction() == original_) {
       original_->parent()->set_root_instruction(replacement_);
     }
-    return true;
+    applied_ = true;
+    return RewriteStatus::OK;
   }
-  else {
-    return false;
-  }
-}
-
-bool Rewrite::Applicable() {
-  if (original_->IsDead()) {
-    return false;
-  }
-  // for (auto* operand : rewrite_operands_) {
-  //   if (operand->IsDead()) {
-  //     return false;
-  //   }
-  // }
-  return applicable_;
 }
 
 }  // namespace xla

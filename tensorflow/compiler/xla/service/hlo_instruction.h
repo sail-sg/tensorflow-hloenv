@@ -2462,6 +2462,14 @@ using HloInstructionPairMap = std::map<HloInstructionPair, ValueT, HloPtrPairCom
 //   see:
 //     HloInstruction* HloComputation::AddInstructionInternal(
 
+enum class RewriteStatus {
+  OK = 0,
+  ADJACENCY = 1,
+  CYCLE = 2,
+  PRUNED = 3,
+  ORIG_INST_DELETED = 4,
+  ALREADY_APPLIED = 5,
+};
 
 class Rewrite {
 
@@ -2484,7 +2492,7 @@ class Rewrite {
   HloInstructionSet new_instructions_;
 
   std::string pass_name_;
-  bool applicable_ = true;
+  bool applied_ = false;
 
   int idx_;
 
@@ -2529,11 +2537,10 @@ class Rewrite {
 
   // Apply the rewrite, returns whether or not the rewrite was applied
   // successfully
-  bool Apply();
+  RewriteStatus Apply();
 
   // Return whether or not the rewrite is still appliable
   bool Applicable();
-  void SetApplicable(bool applicable) { applicable_ = applicable; }
 };
 
 
