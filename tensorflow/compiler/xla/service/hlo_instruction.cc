@@ -3477,6 +3477,7 @@ bool HloInstruction::IsFusible() const {
 
 HloInstruction::HloInstruction(HloOpcode opcode, const Shape& shape)
     : unique_id_(-1),
+      orig_unique_id_(-1),
       opcode_(opcode),
       shape_(shape),
       name_(HloOpcodeString(opcode)),

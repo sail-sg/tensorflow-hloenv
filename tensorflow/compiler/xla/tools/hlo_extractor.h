@@ -88,6 +88,14 @@ class ExtractionVisitor : public ConstDfsHloVisitorWithDefault {
         if (auto new_instruction =
                 clone_context_.FindInstruction(old_instruction)) {
           new_instruction->SetAndSanitizeName(old_instruction->name());
+          // If this has already been cloned before by an extraction, then
+          // utilize the cloned instructions orig_unique_id.
+          // This way even if an instruction gets cloned multiple time it still
+          // gets set to the original instructions id
+          int orig_id = old_instruction->orig_unique_id() == -1 ?
+                        old_instruction->unique_id() :
+                        old_instruction->orig_unique_id();
+          new_instruction->SetOriginalId(orig_id);
         }
       }
     }

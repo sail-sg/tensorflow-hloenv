@@ -1687,6 +1687,13 @@ class HloInstruction {
   // as for the purpose of compacting the instruction unique IDs.
   void ClearUniqueIdInternal() { unique_id_ = -1; }
 
+  // Set the unique id that this instruction was cloned from
+  void SetOriginalId(int id) {
+    CHECK_EQ(orig_unique_id_, -1);  // Should not be assigned already
+    CHECK_GE(id, 0);
+    orig_unique_id_ = id;
+  }
+
   // Set the unique id for this instruction to "id"
   void SetUniqueId(int id) {
     CHECK_EQ(unique_id_, -1);  // Should not be assigned already
@@ -1697,6 +1704,8 @@ class HloInstruction {
   // Return the unique ID assigned to this node via SetUniqueId (or -1
   // if no id has been assigned yet).
   int unique_id() const { return unique_id_; }
+
+  int orig_unique_id() const { return orig_unique_id_; }
 
   template <typename T>
   using EnableIfProto = typename std::enable_if_t<
@@ -2271,6 +2280,9 @@ class HloInstruction {
   bool IsMarkedAsDead() const { return marked_as_dead_; }
 
   int unique_id_;  // Unique to this HloInstruction within a HloModule
+
+  int orig_unique_id_;  // Unique id of the instruction this instruction was
+                        // cloned from, (-1 otherwise)
 
   // Opcode for this instruction.
   HloOpcode opcode_;
