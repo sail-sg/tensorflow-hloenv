@@ -65,6 +65,7 @@ namespace xla {
   }
   changed |= computation->RemoveUnusedTupleOps();
   computation->Prune();
+  computation->Cleanup();
 
   if (changed) {
     VLOG(3) << "After dce:";

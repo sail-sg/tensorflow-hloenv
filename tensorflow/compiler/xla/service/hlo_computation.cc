@@ -1388,7 +1388,6 @@ void HloComputation::Prune() {
       }
     }
   }
-  Cleanup();
 }
 
 /**
@@ -1704,14 +1703,7 @@ void HloComputation::AddRewriteInstruction(HloInstruction* instruction) {
   }
 }
 
-// TODO(ohcy): When do we want to call this? Do we want to leave rewrite plans
-// in-between calls to apply? Or clear everything. If it's the former, then
-// when we apply we should delete any other rewrite plans that have common
-// affected_edges
-//
-// Move any unused newly created instructions over to to_be_deleted
-// for deletion in Cleanup
-void HloComputation::RewriteCleanup() {
+void HloComputation::DetachRewriteInstructions() {
   for (const auto &inst_it : rewrite_new_instruction_iterators_ ) {
     HloInstruction* inst = (*(inst_it.second)).get();
 
@@ -1731,7 +1723,16 @@ void HloComputation::RewriteCleanup() {
       LOG(INFO) << "Already added: " << inst_it.first->name();
     }
   }
+}
 
+// TODO(ohcy): When do we want to call this? Do we want to leave rewrite plans
+// in-between calls to apply? Or clear everything. If it's the former, then
+// when we apply we should delete any other rewrite plans that have common
+// affected_edges
+//
+// Move any unused newly created instructions over to to_be_deleted
+// for deletion in Cleanup
+void HloComputation::RewriteCleanup() {
   for (HloInstruction* inst : instructions()) {
     inst->RewriteCleanup();
   }

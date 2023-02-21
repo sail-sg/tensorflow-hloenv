@@ -207,6 +207,13 @@ class HloModule {
   // Gets the number of instructions in this module.
   int64_t instruction_count() const;
 
+  // Detach newly reconstructed rewrite instructions
+  void DetachRewriteInstructions() {
+    for (auto& comp : computations_) {
+      comp->DetachRewriteInstructions();
+    }
+  }
+
   // Deallocate unused RewriteInstructions and delete rewrite plans
   void RewriteCleanup() {
     for (auto& comp : computations_) {

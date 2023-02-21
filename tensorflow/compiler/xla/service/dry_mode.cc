@@ -43,6 +43,7 @@ StatusOr<bool> DryModeOff::Run(HloModule* module) {
     }
     // Remove the residues
     computation->Prune();
+    computation->Cleanup();
   }
   return changed;
 }

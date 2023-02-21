@@ -604,6 +604,7 @@ class HloComputation {
   bool HasCycle();
 
   void AddRewriteInstruction(HloInstruction* instruction);
+  void DetachRewriteInstructions();
   void RewriteCleanup();
 
  private:
