@@ -2488,6 +2488,7 @@ class Rewrite {
   HloInstructionSet rewrite_operands_;
   HloInstructionSet rewrite_users_;
   HloInstructionPairSet affected_edges_;
+  HloInstructionSet affected_insts_;
 
   HloInstructionSet new_instructions_;
 
@@ -2521,6 +2522,10 @@ class Rewrite {
 
   const HloInstructionSet& operands() const {
     return rewrite_operands_;
+  }
+
+  const HloInstructionSet& affected_insts() const {
+    return affected_insts_;
   }
 
   const HloInstructionPairSet& affected_edges() const {

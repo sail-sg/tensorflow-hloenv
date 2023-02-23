@@ -4970,7 +4970,7 @@ void Rewrite::ComputeRewrite() {
   //         process(operand)
   //
 
-  HloInstructionSet user_set(rewrite_users_);
+  affected_insts_.insert(rewrite_users_.begin(), rewrite_users_.end());
   dfs_stack = {original_};
   while (!dfs_stack.empty()) {
     HloInstruction* current = dfs_stack.back();
@@ -4995,9 +4995,9 @@ void Rewrite::ComputeRewrite() {
 
     // Whether or not a node has a user that's not in the rewrite pattern
     // replacement
-    // bool has_other_user = false;
+    bool has_other_user = false;
     for (auto& user : current->users()) {
-      if (user_set.find(user) != user_set.end()) {
+      if (affected_insts_.find(user) != affected_insts_.end()) {
         affected_edges_.insert(std::make_pair(current, user));
       }
       // else {
@@ -5010,7 +5010,7 @@ void Rewrite::ComputeRewrite() {
     // if (!has_other_user &&
     //     rewrite_operands_.find(current) == rewrite_operands_.end()) {
     if (rewrite_operands_.find(current) == rewrite_operands_.end()) {
-      user_set.insert(current);
+      affected_insts_.insert(current);
       for (auto* operand : current->operands()) {
         dfs_stack.push_back(operand);
       }
