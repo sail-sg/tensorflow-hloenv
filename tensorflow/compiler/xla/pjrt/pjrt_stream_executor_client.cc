@@ -1982,6 +1982,7 @@ StatusOr<ScopedShapedBuffer> PjRtStreamExecutorExecutable::EnqueueExecution(
           argument_handles, *device_buffers, events));
 
   ExecutableRunOptions run_options;
+  ExecutionProfile exec_profile;
   run_options.set_stream(device_state->compute_stream());
   run_options.set_host_to_device_stream(device_state->host_to_device_stream());
   run_options.set_allocator(client_->allocator());
@@ -1992,6 +1993,7 @@ StatusOr<ScopedShapedBuffer> PjRtStreamExecutorExecutable::EnqueueExecution(
   run_options.set_rng_seed(device_state->GetNewPrngSeed());
   run_options.set_gpu_executable_run_options(client_->gpu_run_options());
   run_options.set_launch_id(options.launch_id);
+  run_options.set_execution_profile(&exec_profile);
   if (run_options.launch_id() != 0) {
     VLOG(3) << "launch id for " << name() << ": " << run_options.launch_id();
   }
@@ -2008,9 +2010,12 @@ StatusOr<ScopedShapedBuffer> PjRtStreamExecutorExecutable::EnqueueExecution(
         device_state->compute_semaphore().ScopedAcquire(1));
   }
 
+  uint64_t start_time_ns = tensorflow::Env::Default()->NowNanos();
   StatusOr<ExecutionOutput> result_buffer_or_status =
-      executables_[executable_idx]->RunAsync(std::move(execution_inputs),
-                                             run_options);
+      executables_[executable_idx]->Run(std::move(execution_inputs),
+                                        run_options);
+  compute_time_ns = run_options.execution_profile()->compute_time_ns();
+  async_exec_time_ns = tensorflow::Env::Default()->NowNanos() - start_time_ns;
 
   VLOG(1) << "Replica " << replica << " partition " << partition
           << " completed; ok=" << result_buffer_or_status.ok();
@@ -2454,6 +2459,7 @@ PjRtStreamExecutorClient::GetExecutableExtras(CompileOptions* options) {
   return extras;
 }
 
+// MARK: compilation call chain
 StatusOr<std::unique_ptr<PjRtExecutable>> PjRtStreamExecutorClient::Compile(
     const XlaComputation& computation, CompileOptions options) {
   tensorflow::profiler::TraceMe traceme("PjRtStreamExecutorClient::Compile");

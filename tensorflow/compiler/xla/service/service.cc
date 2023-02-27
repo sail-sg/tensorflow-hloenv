@@ -284,6 +284,7 @@ StatusOr<std::unique_ptr<HloModuleConfig>> Service::CreateModuleConfig(
                             aot_options);
 }
 
+// MARK: compilation call chain
 StatusOr<std::vector<std::unique_ptr<Executable>>> Service::BuildExecutables(
     const std::vector<const HloModuleProto*>& module_protos,
     std::vector<std::unique_ptr<HloModuleConfig>> module_configs,
@@ -779,6 +780,7 @@ Status Service::GetDeviceHandles(const GetDeviceHandlesRequest* arg,
   return Status::OK();
 }
 
+// MARK: compilation call chain
 StatusOr<std::unique_ptr<Executable>> Service::BuildExecutable(
     const HloModuleProto& module_proto,
     std::unique_ptr<HloModuleConfig> module_config, Backend* backend,
@@ -793,6 +795,7 @@ StatusOr<std::unique_ptr<Executable>> Service::BuildExecutable(
       CreateModuleFromProto(module_proto, *module_config, run_backend_only));
   DumpHloModuleIfEnabled(*module, kBeforeOptimizationsDumpName);
 
+  // MARK: compilation call chain
   if (!run_backend_only) {
     TF_ASSIGN_OR_RETURN(module, backend->compiler()->RunHloPasses(
                                     std::move(module), executor, options));

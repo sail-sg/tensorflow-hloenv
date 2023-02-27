@@ -1152,6 +1152,8 @@ ColorScheme HloDotDumper::GetInstructionColor(const HloInstruction* instr) {
     case HloOpcode::kCustomCall:
     case HloOpcode::kWhile:
       return kDarkGreen;
+    case HloOpcode::kAlternatives:
+      return kDarkBlue;
   }
 }
 

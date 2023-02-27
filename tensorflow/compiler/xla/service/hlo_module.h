@@ -167,6 +167,10 @@ class HloModule {
     return H::combine(std::move(h), computations.size());
   }
 
+  // Generates a hash value of an HLO module. Focuses on
+  // the call graphs between multiple computations.
+  uint64_t CalledComputationHash() const;
+
   // Gets the computations in this module.
   //
   // Returns a view of HloComputation*s, so you can iterate over this in the
@@ -210,6 +214,10 @@ class HloModule {
     }
   }
 
+  void Prune();
+
+  void SetDry(bool dry_mode);
+
   // Compute and return a post order of all computations in the module. The sort
   // is defined like so: if computation A has an instruction which calls
   // computation B, then A will appear after B in the sort.
@@ -234,6 +242,8 @@ class HloModule {
   // remove computations from a module while iterating over
   // MakeNonfusionComputations().
   std::vector<HloComputation*> MakeNonfusionComputations() const;
+
+  std::vector<HloComputation*> MakeFusionComputations() const;
 
   // Same as MakeNonfusionComputations() but sorting computations by content.
   std::vector<HloComputation*> MakeNonfusionComputationsSorted() const;
@@ -355,6 +365,22 @@ class HloModule {
 
   Status CheckUniqueNamesAndIdsForComputationsAndInstructions() const;
 
+  // Dedup duplicate operands in Tuple instructions
+  bool RemoveUnusedTupleOps() {
+    bool changed = false;
+    for (HloComputation* computation : computations()) {
+      changed |= computation->RemoveUnusedTupleOps();
+    }
+    return changed;
+  }
+
+  // Dedup duplicate operands in Tuple instructions
+  void RemoveDuplicateTupleOps() {
+    for (HloComputation* computation : computations()) {
+      computation->RemoveDuplicateTupleOps();
+    }
+  }
+
   // Checks if this config has a list of entry parameters' HLO shardings for
   // SPMD.
   bool has_spmd_parameters_shardings() const {
@@ -426,6 +452,8 @@ class HloModule {
   const std::vector<HloModuleProto::ProfileInfo>& profile_info() const {
     return profile_info_list_;
   }
+
+  bool dry_mode() const { return dry_mode_; }
 
   void set_relative_speedup(double relative_speedup) {
     relative_speedup_ = relative_speedup;
@@ -508,6 +536,9 @@ class HloModule {
 
   // The unoptimized module fingerprint.
   std::string autofdo_fingerprint_;
+
+  // Whether or not the module is currently in dry_mode
+  bool dry_mode_ = false;;
 };
 
 }  // namespace xla

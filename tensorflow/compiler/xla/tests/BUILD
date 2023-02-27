@@ -151,6 +151,7 @@ cc_library(
     testonly = True,
     srcs = ["hlo_test_base.cc"],
     hdrs = ["hlo_test_base.h"],
+    visibility = ["//visibility:public"],
     deps = [
         ":literal_test_util",
         ":manifest_checking_test",

@@ -584,6 +584,22 @@ class HloComputation {
   // Returns true if a given instruction is marked dead in this computation.
   bool IsMarkedAsDead(const HloInstruction* inst);
 
+  bool dry() const { return dry_; }
+  void set_dry(bool value);
+
+  void RecordAlternatives(HloInstruction* original, HloInstruction* alt);
+
+  void Prune();
+
+  void RemoveDuplicateTupleOps();
+
+  bool RemoveUnusedTupleOps(int iteration_limit = 25);
+  bool RemoveUnusedTupleOpsHelper(bool delink_unused_tuple_ops = false);
+
+  bool HasCycle(HloInstruction* inst);
+
+  bool HasCycle();
+
  private:
   explicit HloComputation(
       const std::string& name, int parameter_count,
@@ -675,6 +691,14 @@ class HloComputation {
   std::vector<std::unique_ptr<HloInstruction>> to_be_deleted_;
 
   std::vector<HloInstruction*> param_instructions_;
+
+  bool dry_ = false;
+  InstructionList dry_new_instructions_;
+  absl::flat_hash_map<const HloInstruction*, InstructionList::iterator>
+      dry_new_instruction_iterators_;
+  HloInstructionMap<HloInstructionSet>
+      alternatives_;
+  absl::flat_hash_map<HloInstruction*, HloInstruction*> originals_;
 
   HloComputation(const HloComputation&) = delete;
   HloComputation& operator=(const HloComputation&) = delete;

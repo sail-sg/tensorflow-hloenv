@@ -86,6 +86,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/fusion_merger.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_broadcast_folding_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_rewriter.h"
+#include "tensorflow/compiler/xla/service/gpu/general_fusion.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_constants.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_conv_algorithm_picker.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_conv_rewriter.h"
@@ -185,63 +186,6 @@ namespace xla {
 namespace gpu {
 namespace {
 
-class GpuBfloat16Support : public BFloat16Support {
- public:
-  explicit GpuBfloat16Support(bool supports_matrix_multiplication,
-                              se::StreamExecutor* stream_exec)
-      : supports_matrix_multiplication_(supports_matrix_multiplication),
-        stream_exec_(stream_exec) {}
-
-  bool SupportsBF16Operand(const HloInstruction& hlo,
-                           int64_t operand_index) const override {
-    return BFloat16Support::SupportsBF16Operand(hlo, operand_index) ||
-           IsSupported(hlo);
-  }
-
-  // Returns whether the backend supports BF16 output for the HLO instruction.
-  bool SupportsBF16Output(const HloInstruction& hlo) const override {
-    return BFloat16Support::SupportsBF16Output(hlo) || IsSupported(hlo);
-  }
-
- private:
-  bool IsSupported(const HloInstruction& hlo) const {
-    switch (hlo.opcode()) {
-      case HloOpcode::kAllGather:
-      case HloOpcode::kAllReduce:
-      case HloOpcode::kAllReduceStart:
-      case HloOpcode::kAllReduceDone:
-      case HloOpcode::kReduceScatter:
-      case HloOpcode::kAllToAll:
-      case HloOpcode::kBitcast:
-      case HloOpcode::kCollectivePermute:
-        return true;
-      case HloOpcode::kConvolution:
-        return IsConvBF16Supported();
-      default:
-        return supports_matrix_multiplication_ &&
-               gpu::IsMatrixMultiplication(hlo);
-    }
-  }
-
-  bool IsConvBF16Supported() const {
-    if (se::dnn::DnnSupport* dnn = stream_exec_->AsDnn()) {
-      se::port::StatusOr<se::dnn::VersionInfo> cudnn_version =
-          dnn->GetVersion();
-      return cudnn_version.ok() &&
-             (cudnn_version->major_version() > 8 ||
-              (cudnn_version->major_version() == 8 &&
-               cudnn_version->minor_version() >= 2)) &&
-             stream_exec_->GetDeviceDescription()
-                 .cuda_compute_capability()
-                 .IsAtLeast(se::CudaComputeCapability::AMPERE);
-    }
-    return false;
-  }
-
-  bool supports_matrix_multiplication_;
-  se::StreamExecutor* stream_exec_;
-};
-
 int64_t GetSizeOfShape(const Shape& shape, int pointer_size) {
   if (shape.is_static() || shape.IsTuple()) {
     return ShapeUtil::ByteSizeOf(shape, pointer_size);
@@ -291,6 +235,7 @@ GpuCompiler::GpuCompiler(se::Platform::Id platform_id,
 Status GpuCompiler::OptimizeHloModule(
     HloModule* hlo_module, se::StreamExecutor* stream_exec,
     se::DeviceMemoryAllocator* device_allocator) {
+
   // Save proto state before optimizations if we want a snapshot.
   if (DumpingEnabledForHloModule(*hlo_module)) {
     hlo_proto_ = absl::make_unique<HloProto>();
@@ -754,6 +699,8 @@ Status GpuCompiler::OptimizeHloPostLayoutAssignment(
 StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* stream_exec,
     const CompileOptions& options) {
+  throw Intercept<GpuCompiler>(this, std::move(module), stream_exec,
+                               options);  // This is where we handover control
   // We dump the post-optimization HLO in RunBackend so no need to dump it here.
   XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
   uint64_t start_usecs = tensorflow::Env::Default()->NowMicros();
@@ -772,6 +719,22 @@ StatusOr<std::unique_ptr<HloModule>> GpuCompiler::RunHloPasses(
   RecordHloPassesDuration(end_usecs - start_usecs);
 
   return std::move(module);
+}
+
+Status GpuCompiler::RunHloPasses(HloModule* module,
+                                 se::StreamExecutor* stream_exec,
+                                 const CompileOptions& options) {
+  // We dump the post-optimization HLO in RunBackend so no need to dump it here.
+  XLA_SCOPED_LOGGING_TIMER("GpuCompiler::RunHloPasses");
+  tensorflow::profiler::TraceMe activity(
+      [&] { return absl::StrCat("HLO Transforms:", module->name()); },
+      tensorflow::profiler::TraceMeLevel::kInfo);
+
+  TF_RETURN_IF_ERROR(
+      OptimizeHloModule(module, stream_exec, options.device_allocator));
+
+  TF_RETURN_IF_ERROR(PrepareHloModuleForIrEmitting(module));
+  return Status::OK();
 }
 
 static absl::optional<bool> DummyCanShareBufferFunction(const HloInstruction*,
@@ -1600,6 +1563,8 @@ StatusOr<std::unique_ptr<Executable>> CompileLmhloToExecutable(
        std::move(ir_emitter_context->constants()), std::move(output_info),
        module_name, output_shape, std::move(allocations)});
 }
+
+#include "tensorflow/compiler/xla/service/gpu/gpu_compiler_ext.h"
 
 }  // namespace gpu
 }  // namespace xla

@@ -857,6 +857,9 @@ struct CompiledMemoryStats {
 // when passed to the execution.
 class PjRtExecutable {
  public:
+  mutable uint64_t compute_time_ns = 0;
+  mutable uint64_t async_exec_time_ns = 0;
+
   virtual ~PjRtExecutable() = default;
 
   virtual PjRtClient* client() const = 0;

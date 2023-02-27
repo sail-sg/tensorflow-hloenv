@@ -87,6 +87,7 @@ bool CanInferShape(HloOpcode code) {
     case HloOpcode::kAdd:
     case HloOpcode::kAddDependency:
     case HloOpcode::kAfterAll:
+    case HloOpcode::kAlternatives:
     case HloOpcode::kAtan2:
     case HloOpcode::kBatchNormGrad:
     case HloOpcode::kBatchNormInference:
@@ -1339,6 +1340,23 @@ HloInstruction* HloParserImpl::CreateInstruction(  // NOLINT
           *shape, opcode, operands[0], operands[1], operands[2]));
     }
     // Other supported ops.
+    case HloOpcode::kAlternatives: {
+      if (!preset_operands && !ParseOperands(&operands, builder)) {
+        return nullptr;
+      }
+      if (!maybe_infer_shape([&] {
+            absl::InlinedVector<const Shape*, 2> arg_shapes;
+            arg_shapes.reserve(operands.size());
+            for (auto* operand : operands) {
+              arg_shapes.push_back(&operand->shape());
+            }
+            return ShapeInference::InferVariadicOpShape(opcode, arg_shapes);
+          })) {
+        return nullptr;
+      }
+      return builder->AddInstruction(
+          HloInstruction::CreateAlternatives(*shape, operands));
+    }
     case HloOpcode::kConvert: {
       if ((!preset_operands &&
            !ParseOperands(&operands, builder, /*expected_size=*/1)) ||

@@ -32,6 +32,7 @@ class BFloat16Normalization : public HloModulePass {
 
   ~BFloat16Normalization() override = default;
   absl::string_view name() const override { return "bf16-normalization"; }
+  const BFloat16Support* bfloat16_support() { return bfloat16_support_; }
 
   // Run BF16 normalization on the given computation. Returns whether the
   // computation was changed.

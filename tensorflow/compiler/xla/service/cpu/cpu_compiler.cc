@@ -777,6 +777,8 @@ Status CreateHloProfilingArtifacts(
 StatusOr<std::unique_ptr<HloModule>> CpuCompiler::RunHloPasses(
     std::unique_ptr<HloModule> module, se::StreamExecutor* /*stream_exec*/,
     const CompileOptions& /*options*/) {
+  throw Intercept<CpuCompiler>(this, std::move(module)); // This is where we handover control
+
   std::unique_ptr<llvm::TargetMachine> jit_target_machine =
       SimpleOrcJIT::InferTargetMachineForJIT(
           CompilerTargetOptions(module->config()),

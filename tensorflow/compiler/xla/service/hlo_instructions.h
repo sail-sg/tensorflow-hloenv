@@ -2055,6 +2055,17 @@ class HloRngBitGeneratorInstruction : public HloInstruction {
   RandomAlgorithm algorithm_;
 };
 
+class HloAlternatives : public HloInstruction {
+ public:
+  HloAlternatives(const Shape& shape,
+                  absl::Span<HloInstruction* const> operands);
+  void Select(int alternative_index);
+
+  std::unique_ptr<HloInstruction> CloneWithNewOperandsImpl(
+      const Shape& shape, absl::Span<HloInstruction* const> new_operands,
+      HloCloneContext* context) const override;
+};
+
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_HLO_INSTRUCTIONS_H_

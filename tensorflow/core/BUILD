@@ -1299,6 +1299,7 @@ cc_library(
         "@com_google_absl//absl/base:core_headers",
         "//tensorflow/core/platform/default/build_config:platformlib",
     ] + if_static([":lib_internal_impl"]),
+    visibility = ["//visibility:public"],
 )
 
 # Until we can ditch config=monolithic on windows, we have to provide an always

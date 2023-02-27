@@ -217,6 +217,7 @@ cc_library(
     name = "hlo_extractor",
     srcs = ["hlo_extractor.cc"],
     hdrs = ["hlo_extractor.h"],
+    visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/compiler/xla:status",
         "//tensorflow/compiler/xla/service:hlo",
@@ -230,6 +231,7 @@ cc_library(
 tf_cc_binary(
     name = "interactive_graphviz",
     srcs = ["interactive_graphviz.cc"],
+    visibility = ["//visibility:public"],
     deps = [
         ":hlo_extractor",
         "//tensorflow/compiler/xla/service:hlo_graph_dumper",
@@ -262,7 +264,7 @@ cc_library(
     name = "hlo_module_loader",
     srcs = ["hlo_module_loader.cc"],
     hdrs = ["hlo_module_loader.h"],
-    visibility = ["//tensorflow/compiler/xla:friends"],
+    visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/compiler/xla:debug_options_flags",
         "//tensorflow/compiler/xla:statusor",

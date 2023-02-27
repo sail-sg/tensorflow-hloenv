@@ -141,6 +141,7 @@ class LocalClient : public Client {
   //
   // The given ExecutableBuildOptions overrides any values from XLA_FLAGS
   // environment variable.
+  // MARK: compilation call chain
   StatusOr<std::vector<std::unique_ptr<LocalExecutable>>> Compile(
       const XlaComputation& computation,
       const absl::Span<const Shape* const> argument_layouts,

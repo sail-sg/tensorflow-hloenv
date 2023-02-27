@@ -59,6 +59,7 @@ namespace xla {
   V(kAsyncUpdate, "async-update", 1)                                           \
   V(kAsyncDone, "async-done", 1)                                               \
   V(kAtan2, "atan2", 2)                                                        \
+  V(kAlternatives, "alternatives", kHloOpcodeIsVariadic)                       \
   V(kBatchNormGrad, "batch-norm-grad", 5)                                      \
   V(kBatchNormInference, "batch-norm-inference", 5)                            \
   V(kBatchNormTraining, "batch-norm-training", 3)                              \

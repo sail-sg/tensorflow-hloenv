@@ -136,7 +136,7 @@ cc_library(
     name = "pjrt_client",
     srcs = ["pjrt_client.cc"],
     hdrs = ["pjrt_client.h"],
-    visibility = ["//tensorflow/compiler/xla:friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":pjrt_future",
         "//tensorflow/compiler/xla:literal",
@@ -309,7 +309,7 @@ cc_library(
     srcs = ["cpu_device.cc"],
     hdrs = ["cpu_device.h"],
     compatible_with = [],
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":pjrt_stream_executor_client",
         "//tensorflow/compiler/xla:statusor",
@@ -325,7 +325,7 @@ cc_library(
     srcs = ["gpu_device.cc"],
     hdrs = ["gpu_device.h"],
     defines = if_cuda(["GOOGLE_CUDA=1"]) + if_rocm(["TENSORFLOW_USE_ROCM=1"]),
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":pjrt_stream_executor_client",
         "@com_google_absl//absl/base:core_headers",

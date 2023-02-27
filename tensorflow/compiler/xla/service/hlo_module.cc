@@ -796,6 +796,15 @@ std::vector<HloComputation*> HloModule::MakeNonfusionComputationsSorted()
   return result;
 }
 
+std::vector<HloComputation*> HloModule::MakeFusionComputations() const {
+  std::vector<HloComputation*> result = MakeComputationPostOrder();
+  result.erase(std::remove_if(
+                   result.begin(), result.end(),
+                   [](HloComputation* c) { return !c->IsFusionComputation(); }),
+               result.end());
+  return result;
+}
+
 std::unique_ptr<HloModule> HloModule::Clone(const std::string& suffix) const {
   return Clone(config(), suffix);
 }
@@ -884,6 +893,33 @@ HloComputation* HloModule::GetComputationWithName(absl::string_view name) {
       computations_in_module,
       [&](HloComputation* computation) { return computation->name() == name; });
   return it == computations_in_module.end() ? nullptr : *it;
+}
+
+uint64_t HloModule::CalledComputationHash() const {
+  return absl::HashOf(*this);
+}
+
+void HloModule::Prune() {
+  auto computations = MakeComputationPostOrder();
+  for (auto* computation : computations) {
+    computation->Prune();
+  }
+  RemoveUnusedComputations();
+}
+
+void HloModule::SetDry(bool dry_mode) {
+  if (dry_mode != dry_mode_) {
+    for (xla::HloComputation* computation : MakeNonfusionComputations()) {
+      computation->set_dry(dry_mode);
+    }
+    dry_mode_ = dry_mode;
+    // Remove unused computations that might been orphaned during the
+    // set dry_off processes (e.g. alternatives deleted due to generating
+    // a cycle)
+    if (!dry_mode_) {
+      RemoveUnusedComputations();
+    }
+  }
 }
 
 /* static */ std::atomic<int> HloModule::next_unique_module_id_(0);

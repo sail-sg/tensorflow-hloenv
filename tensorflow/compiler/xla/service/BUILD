@@ -551,6 +551,7 @@ cc_library(
         "hlo_module_metadata.h",
         "hlo_op_metadata.h",
         "hlo_opcode.h",
+        "hlo_reachability.h",
         "hlo_schedule.h",
         "hlo_sharding.h",
         "hlo_sharding_metadata.h",
@@ -588,6 +589,7 @@ cc_library(
         "@com_google_absl//absl/types:optional",
         "@com_google_absl//absl/types:span",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(
@@ -1086,6 +1088,7 @@ cc_library(
     name = "service",
     srcs = ["service.cc"],
     hdrs = ["service.h"],
+    visibility = ["//visibility:public"],
     deps = [
         ":allocation_tracker",
         ":backend",
@@ -1978,6 +1981,17 @@ cc_library(
         "//tensorflow/compiler/xla:statusor",
         "//tensorflow/compiler/xla:util",
         "@com_google_absl//absl/algorithm:container",
+    ],
+)
+
+cc_library(
+    name = "dry_mode",
+    srcs = ["dry_mode.cc"],
+    hdrs = ["dry_mode.h"],
+    deps = [
+        ":hlo",
+        ":hlo_creation_utils",
+        ":hlo_pass",
     ],
 )
 
@@ -4630,6 +4644,7 @@ cc_library(
     ],
     deps = [
         ":compilation_stats",
+        ":dry_mode",
         ":dump",
         ":hlo",
         ":hlo_graph_dumper",
@@ -4640,12 +4655,14 @@ cc_library(
         "//tensorflow/compiler/xla:types",
         "//tensorflow/compiler/xla:util",
         "//tensorflow/core:lib",
+        "//tensorflow/core/util:env_var",
         "@com_google_absl//absl/container:flat_hash_map",
         "@com_google_absl//absl/container:flat_hash_set",
         "@com_google_absl//absl/memory",
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/strings:str_format",
     ],
+    visibility = ["//visibility:public"],
 )
 
 tf_cc_test(

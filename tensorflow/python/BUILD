@@ -4207,6 +4207,7 @@ alias(
 alias(
     name = "pybind11_lib",
     actual = "//tensorflow/python/lib/core:pybind11_lib",
+    visibility = ["//visibility:public"],
 )
 
 alias(

@@ -1276,6 +1276,27 @@ tf_cc_test(
 )
 
 cc_library(
+    name = "general_fusion",
+    srcs = ["general_fusion.cc"],
+    hdrs = ["general_fusion.h"],
+    deps = [
+        ":gpu_fusible",
+        ":instruction_fusion",
+        ":ir_emission_utils",
+        "//tensorflow/compiler/xla:shape_util",
+        "//tensorflow/compiler/xla:util",
+        "//tensorflow/compiler/xla/service:hlo",
+        "//tensorflow/compiler/xla/service:hlo_cost_analysis",
+        "//tensorflow/compiler/xla/service:hlo_graph_dumper",
+        "//tensorflow/compiler/xla/service:hlo_pass",
+        "//tensorflow/compiler/xla/service/llvm_ir:fused_ir_emitter",
+        "//tensorflow/core:lib",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
     name = "gpu_conv_padding_legalization",
     srcs = ["gpu_conv_padding_legalization.cc"],
     hdrs = ["gpu_conv_padding_legalization.h"],
@@ -1507,6 +1528,7 @@ cc_library(
     name = "gpu_compiler",
     srcs = [
         "gpu_compiler.cc",
+        "gpu_compiler_ext.h",
     ],
     hdrs = [
         "gpu_compiler.h",
@@ -1522,6 +1544,7 @@ cc_library(
         ":fusion_merger",
         ":gemm_broadcast_folding_rewriter",
         ":gemm_rewriter",
+        ":general_fusion",
         ":gpu_constants",
         ":gpu_conv_algorithm_picker",
         ":gpu_conv_rewriter",
@@ -1660,6 +1683,7 @@ cc_library(
         ],
         "//conditions:default": [],
     }),
+    visibility = ["//visibility:public"],
 )
 
 cc_library(

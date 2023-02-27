@@ -274,7 +274,9 @@ class DfsHloVisitorWithDefaultBase
   Status HandleAddDependency(HloInstructionPtr add_dependency) override {
     return DefaultAction(add_dependency);
   }
-
+  Status HandleAlternatives(HloInstructionPtr alternatives) override {
+    return DefaultAction(alternatives);
+  }
   // Invoked to inform the visitor that the traversal has completed, and that
   // the root was "root".
   Status FinishVisit(HloInstructionPtr /*root*/) override {

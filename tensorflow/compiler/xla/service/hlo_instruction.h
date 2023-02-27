@@ -603,6 +603,9 @@ class HloInstruction {
       const Shape& shape, HloOpcode opcode,
       absl::Span<HloInstruction* const> operands);
 
+  static std::unique_ptr<HloInstruction> CreateAlternatives(
+      const Shape& shape, absl::Span<HloInstruction* const> operands);
+
   // Creates a map instruction, where the computation (given by the handle) is
   // applied element-wise to every element in operands (across the operands,
   // at a given index)
@@ -1206,6 +1209,11 @@ class HloInstruction {
   // Returns the number of users of this instruction.
   int64_t user_count() const { return users_.size(); }
 
+  // Removes all instructions from the user set
+  void clear_users() {
+    users_.clear();
+  }
+
   // Returns the users of this instruction.
   const std::vector<HloInstruction*>& users() const { return users_; }
 
@@ -1509,6 +1517,9 @@ class HloInstruction {
   bool IsFusible() const;
 
   bool IsCustomCall(absl::string_view target) const;
+
+  bool dry() const { return dry_; }
+  void set_dry(bool value) { dry_ = value; }
 
   // Returns the sharding applied to this operator.
   // REQUIRES: has_sharding() is true.
@@ -2109,6 +2120,9 @@ class HloInstruction {
   void RemoveAllOperands() { operands_.clear(); }
 
   void RemoveOperandAt(int index) {
+    if (dry_) {
+      return;
+    }
     operands_.erase(operands_.begin() + index);
   }
 
@@ -2323,6 +2337,7 @@ class HloInstruction {
   // Intrusive flag used by HloComputation, whether this instruction has
   // been marked as dead.
   bool marked_as_dead_;
+  bool dry_ = false;
 
   HloInstruction(const HloInstruction&) = delete;
   HloInstruction& operator=(const HloInstruction&) = delete;

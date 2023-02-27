@@ -147,6 +147,7 @@ cc_library(
         "@pybind11",
         "@pybind11_abseil//pybind11_abseil:absl_casters",
     ],
+    visibility = ["//visibility:public"],
 )
 
 cc_library(

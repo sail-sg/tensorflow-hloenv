@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/compiler/xla/service/hlo_pass_pipeline.h"
 
+#include <fstream>
 #include <functional>
 #include <string>
 
@@ -30,6 +31,7 @@ limitations under the License.
 #include "tensorflow/compiler/xla/util.h"
 #include "tensorflow/core/platform/errors.h"
 #include "tensorflow/core/platform/logging.h"
+#include "tensorflow/core/util/env_var.h"
 
 namespace xla {
 
@@ -286,5 +288,15 @@ StatusOr<bool> HloPassPipeline::RunOnModuleGroup(HloModuleGroup* module_group) {
   return RunPassesInternal(module_group,
                            module_group->module(0).config().debug_options());
 }
+
+std::set<std::string> HloPassPipeline::ExtractDrySandwichSetFromEnv() {
+  std::vector<std::string> dry_passes;
+  TF_CHECK_OK(tensorflow::ReadStringsFromEnvVar(
+      /*env_var_name=*/"DRY", /*default_val=*/"", &dry_passes));
+  return std::set<std::string>(dry_passes.begin(), dry_passes.end());
+}
+
+std::set<std::string> HloPassPipeline::dry_sandwich_set =
+    ExtractDrySandwichSetFromEnv();
 
 }  // namespace xla

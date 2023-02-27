@@ -204,7 +204,8 @@ bool IsLoopFusible(const HloInstruction& instr) {
 }
 
 FusionDecision IsProducerConsumerFusible(const HloInstruction& producer,
-                                         const HloInstruction& consumer) {
+                                         const HloInstruction& consumer,
+                                         bool general_fusion) {
   if (!IsLoopFusible(producer)) {
     return "the producer is not loop-fusible";
   }
@@ -214,7 +215,7 @@ FusionDecision IsProducerConsumerFusible(const HloInstruction& producer,
   }
 
   // Skip multiple output fusion. It's not yet supported.
-  if (producer.IsMultiOutputFusion()) {
+  if ((!general_fusion) && producer.IsMultiOutputFusion()) {
     return "the producer is not fusible as it is a multi-output fusion";
   }
 
@@ -248,9 +249,10 @@ FusionDecision IsProducerConsumerFusible(const HloInstruction& producer,
 }
 
 bool IsProducerConsumerMultiOutputFusible(const HloInstruction& producer,
-                                          const HloInstruction& consumer) {
+                                          const HloInstruction& consumer,
+                                          bool general_fusion) {
   // Skip multiple output fusion. It's not yet supported.
-  if (producer.IsMultiOutputFusion()) {
+  if ((!general_fusion) && producer.IsMultiOutputFusion()) {
     return false;
   }
 
@@ -287,7 +289,7 @@ bool IsProducerConsumerMultiOutputFusible(const HloInstruction& producer,
   if (CreatesNestedLoop(producer, consumer)) {
     return false;
   }
-  if (!ShapesCompatibleForMultiOutputFusion(producer, consumer)) {
+  if ((!general_fusion) && !ShapesCompatibleForMultiOutputFusion(producer, consumer)) {
     return false;
   }
   if (!LayoutsAreReduceInputFusionFriendly(producer, consumer)) {

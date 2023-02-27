@@ -1552,6 +1552,10 @@ Status ShapeVerifier::HandleSetDimensionSize(HloInstruction* set_size) {
                         set_size->operand(1)->shape(), set_size->dimension()));
 }
 
+Status ShapeVerifier::HandleAlternatives(HloInstruction* alternatives) {
+  return Status::OK();
+}
+
 Status ShapeVerifier::CheckShape(const HloInstruction* instruction,
                                  const Shape& inferred_shape,
                                  bool only_compare_minor_to_major_in_layout) {

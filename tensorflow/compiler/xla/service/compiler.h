@@ -359,6 +359,21 @@ class Compiler {
   GetPlatformCompilers();
 };
 
+template <typename XlaCompiler>
+class Intercept : public std::exception {
+ public:
+  Intercept() {}
+  Intercept(XlaCompiler* c, std::unique_ptr<HloModule> m,
+            se::StreamExecutor* s, const Compiler::CompileOptions& o)
+      : compiler(c), module(std::move(m)), stream_exec(s), options(o) {}
+  Intercept(XlaCompiler* c, std::unique_ptr<HloModule> m)
+      : compiler(c), module(std::move(m)) {}
+  XlaCompiler* compiler;
+  std::unique_ptr<HloModule> module;
+  se::StreamExecutor* stream_exec;
+  Compiler::CompileOptions options;
+};
+
 }  // namespace xla
 
 #endif  // TENSORFLOW_COMPILER_XLA_SERVICE_COMPILER_H_

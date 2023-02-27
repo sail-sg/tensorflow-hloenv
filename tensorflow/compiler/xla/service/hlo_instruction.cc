@@ -1139,6 +1139,11 @@ HloInstruction::CreateRngBitGenerator(const Shape& shape, HloInstruction* state,
   return CreateNary(shape, opcode, operands);
 }
 
+/* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateAlternatives(
+    const Shape& shape, absl::Span<HloInstruction* const> operands) {
+  return absl::make_unique<HloAlternatives>(shape, operands);
+}
+
 /* static */ std::unique_ptr<HloInstruction> HloInstruction::CreateMap(
     const Shape& shape, absl::Span<HloInstruction* const> operands,
     HloComputation* map_computation) {
@@ -2000,6 +2005,7 @@ std::unique_ptr<HloInstruction> HloInstruction::CloneWithNewOperands(
     case HloOpcode::kSetDimensionSize:
     case HloOpcode::kTriangularSolve:
     case HloOpcode::kCholesky:
+    case HloOpcode::kAlternatives:
       clone = CloneWithNewOperandsImpl(shape, new_operands, context);
       break;
     // Unary ops.
@@ -2364,6 +2370,10 @@ void HloInstruction::AppendOperand(HloInstruction* operand) {
 
 void HloInstruction::RemoveOperandsAtAscendingIndices(
     absl::Span<const int> ascending_indices) {
+  if (dry_) {
+    return;
+  }
+
   if (ascending_indices.empty()) {
     return;
   }
@@ -2559,6 +2569,12 @@ bool HloInstruction::IdenticalSlowPath(
 }
 
 void HloInstruction::RemoveUser(HloInstruction* user) {
+  // If it is touching the old graph, stop it
+  // else go ahead
+  if (dry_ && user->dry()) {
+    return;
+  }
+
   auto map_it = user_map_.find(user);
   CHECK(map_it != user_map_.end());
 
@@ -2590,6 +2606,11 @@ Status HloInstruction::ReplaceUseWithDifferentShape(
   VLOG(3) << "Replacing uses of " << name() << " in " << user->name()
           << " with " << new_producer->name();
 
+  if (dry_) {
+    parent_->RecordAlternatives(this, new_producer);
+    return Status::OK();
+  }
+
   RemoveUser(user);
 
   TF_RET_CHECK(absl::c_count(user->operands_, this) >= 0);
@@ -2620,6 +2641,11 @@ Status HloInstruction::ReplaceOperandWithDifferentShape(
   TF_RET_CHECK(operand_num < operand_count());
   HloInstruction* old_operand = mutable_operand(operand_num);
   if (old_operand == new_operand) {
+    return Status::OK();
+  }
+
+  if (dry_) {
+    parent_->RecordAlternatives(old_operand, new_operand);
     return Status::OK();
   }
 
@@ -2666,6 +2692,12 @@ Status HloInstruction::ReplaceAllUsesWith(HloInstruction* new_producer) {
 Status HloInstruction::ReplaceAllUsesWithDifferentShape(
     HloInstruction* new_producer) {
   bool new_producer_is_user = false;
+
+  if (dry_) {
+    parent_->RecordAlternatives(this, new_producer);
+    return Status::OK();
+  }
+
   for (HloInstruction* user : users()) {
     if (user == new_producer) {
       // It's possible that new_producer is a user of this instruction as might
@@ -3629,6 +3661,8 @@ Status HloInstruction::Visit(DfsHloVisitorBase<HloInstructionPtr>* visitor) {
       return visitor->HandleCholesky(this);
     case HloOpcode::kOptimizationBarrier:
       return visitor->HandleOptimizationBarrier(this);
+    case HloOpcode::kAlternatives:
+      return visitor->HandleAlternatives(this);
 
     // These opcodes are not handled here.
     case HloOpcode::kTrace:

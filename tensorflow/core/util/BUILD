@@ -596,6 +596,7 @@ cc_library(
     name = "env_var",
     srcs = ["env_var.cc"],
     hdrs = ["env_var.h"],
+    visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/core/platform:errors",
         "//tensorflow/core/platform:logging",

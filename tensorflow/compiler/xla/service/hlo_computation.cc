@@ -35,9 +35,12 @@ limitations under the License.
 #include "tensorflow/compiler/xla/layout_util.h"
 #include "tensorflow/compiler/xla/map_util.h"
 #include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
+#include "tensorflow/compiler/xla/service/hlo_casting_utils.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
+#include "tensorflow/compiler/xla/service/hlo_instructions.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_opcode.h"
+#include "tensorflow/compiler/xla/service/hlo_reachability.h"
 #include "tensorflow/compiler/xla/shape_util.h"
 #include "tensorflow/compiler/xla/status_macros.h"
 #include "tensorflow/compiler/xla/types.h"
@@ -126,8 +129,13 @@ HloInstruction* HloComputation::AddInstructionInternal(
   }
   instruction->set_parent(this);
   HloInstruction* pinst = instruction.get();
-  instruction_iterators_[pinst] =
-      instructions_.insert(instructions_.end(), std::move(instruction));
+  if (dry_) {
+    dry_new_instruction_iterators_[pinst] = dry_new_instructions_.insert(
+        dry_new_instructions_.end(), std::move(instruction));
+  } else {
+    instruction_iterators_[pinst] =
+        instructions_.insert(instructions_.end(), std::move(instruction));
+  }
   return pinst;
 }
 
@@ -233,6 +241,7 @@ Status HloComputation::RemoveUnusedParametersFromAnyComputation() {
 
 Status HloComputation::RemoveUnusedParametersImpl(bool allow_non_fusion) {
   CHECK(allow_non_fusion || IsFusionComputation());
+  CHECK(!IsEntryComputation());
   int64_t removed = 0;
   for (int64_t i = 0; i < param_instructions_.size(); ++i) {
     HloInstruction* param_instruction = param_instructions_[i];
@@ -290,6 +299,15 @@ bool HloComputation::IsMarkedAsDead(const HloInstruction* inst) {
 
 Status HloComputation::RemoveInstructionAndUnusedOperands(
     HloInstruction* instruction, std::function<void(HloInstruction*)> cleanup) {
+  if (dry_) {
+    return Status::OK();
+  }
+
+  // If it is still in use, don't remove
+  if (instruction->user_count() != 0) {
+    return Status::OK();
+  }
+
   TF_RET_CHECK(root_instruction() != instruction);
 
   TF_RET_CHECK(instruction->IsDead());
@@ -313,7 +331,15 @@ Status HloComputation::RemoveInstructionAndUnusedOperands(
     if (cleanup) {
       cleanup(item);
     }
-    TF_RETURN_IF_ERROR(RemoveInstruction(item));
+
+    // TODO(ohcy): In future we might want to patch this code so that 
+    // Tensorflow updates the parameters_ vector properly when kParameters
+    // are deleted. Currently only RemoveUnusedParametersFromFusedComputation
+    // and RemoveUnusedParametersFromAnyComputation do that.
+    if (item->opcode() != xla::HloOpcode::kParameter) {
+      TF_RETURN_IF_ERROR(RemoveInstruction(item));
+    }
+
     removed.insert(item);
   }
   return Status::OK();
@@ -329,6 +355,10 @@ Status HloComputation::ForceRemoveInstruction(HloInstruction* instruction) {
 
 Status HloComputation::RemoveInstructionImpl(HloInstruction* instruction,
                                              bool ignore_safety_check) {
+  if (dry_) {
+    return Status::OK();
+  }
+
   VLOG(2) << "Removing instruction " << instruction->name()
           << " from computation " << name();
   TF_RET_CHECK(ignore_safety_check || IsSafelyRemovable(instruction))
@@ -358,6 +388,15 @@ Status HloComputation::RemoveInstructionImpl(HloInstruction* instruction,
 
 void HloComputation::set_root_instruction(HloInstruction* new_root_instruction,
                                           bool accept_different_shape) {
+  if (dry_) {
+    CHECK(new_root_instruction->shape() == root_instruction_->shape())
+        << "HloPass is changing the root instruction "
+           "shape, which conflicts with dry run "
+        << new_root_instruction->shape() << " vs "
+        << root_instruction_->shape();
+    RecordAlternatives(root_instruction_, new_root_instruction);
+    return;
+  }
   // The shape of the root (ignoring layout) is an invariant of the computation
   // for non-fusion cases.
   if (!IsFusionComputation() && !accept_different_shape) {
@@ -947,7 +986,8 @@ StatusOr<bool> HloComputation::ReplaceInstructionWithDifferentShape(
       (old_instruction->opcode() != HloOpcode::kCustomCall ||
        old_instruction->custom_call_target() ==
            new_instruction->custom_call_target())) {
-    new_instruction->SetAndSanitizeName(old_instruction->name());
+    // Comment out this, because now all the ops will be kept in the same graph.
+    // new_instruction->SetAndSanitizeName(old_instruction->name());
   }
 
   TF_RETURN_IF_ERROR(RemoveInstructionAndUnusedOperands(old_instruction));
@@ -1105,7 +1145,7 @@ std::unique_ptr<HloComputation> HloComputation::CloneWithReplacements(
         }
       }
     }
-  }
+  } 
 
   std::vector<std::unique_ptr<HloInstruction>> instructions;
   // First add the extra parameters to 'instructions'.
@@ -1171,4 +1211,442 @@ HloInstruction* HloComputation::GetInstructionWithName(absl::string_view name) {
 bool HloComputation::IsEntryComputation() const {
   return parent()->entry_computation() == this;
 }
+
+bool HloComputation::HasCycle(HloInstruction* inst) {
+  FunctionVisitor visitor(
+      [](HloInstruction* instruction) { return Status::OK(); });
+  auto visit_status = inst->Accept(&visitor);
+  return !visit_status.ok();
+}
+
+bool HloComputation::HasCycle() {
+  return HasCycle(root_instruction());
+};
+
+void HloComputation::set_dry(bool value) {
+  if (dry_ == value) {
+    return;
+  }
+  if (value == true) {
+    // turn on all the flags
+    dry_ = true;
+    for (HloInstruction* inst : instructions()) {
+      inst->set_dry(true);
+    }
+    CHECK_EQ(dry_new_instructions_.size(), 0);
+    CHECK_EQ(dry_new_instruction_iterators_.size(), 0);
+    CHECK_EQ(alternatives_.size(), 0);
+    CHECK_EQ(originals_.size(), 0);
+  } else {
+    // turn off all the flags
+    dry_ = false;
+    for (HloInstruction* inst : instructions()) {
+      inst->set_dry(false);
+    }
+    // check the number of new instructions
+    int num = dry_new_instructions_.size();
+    if (num > 0) {
+      LOG(ERROR) << num << " instructions added in dry mode, original ("
+                 << instruction_count() << ")";
+    }
+    // append dry mode added instructions to this computation
+    for (std::unique_ptr<HloInstruction>& inst : dry_new_instructions_) {
+      HloInstruction* pinst = inst.get();
+      pinst->set_dry(false);
+      instruction_iterators_[pinst] =
+          instructions_.insert(instructions_.end(), std::move(inst));
+    }
+    // clear the dry mode buffer
+    dry_new_instructions_.clear();
+    dry_new_instruction_iterators_.clear();
+
+    std::vector<HloInstruction*> to_delete;
+    // Convert alternatives to instructions
+    // to keep everyone alive
+    for (const auto& alts_kv : alternatives_) {
+      HloInstruction* original = alts_kv.first;
+      std::vector<HloInstruction*> users_without_kalt(original->users());
+      HloInstructionSet alternatives = alts_kv.second;
+      std::vector<HloInstruction*> all = {original};
+      all.insert(all.end(), alternatives.begin(), alternatives.end());
+      HloInstruction* alt = AddInstruction(
+          HloInstruction::CreateAlternatives(original->shape(), all));
+      original->ReplaceUsesWith(users_without_kalt, alt);
+      if (original == root_instruction()) {
+        set_root_instruction(alt);
+      }
+      if (HasCycle(alt)) {
+        // Deconnect kalt and select Original, but defer deletion of itself
+        // and unused operands till the end, since some of its operands
+        // may be used by new alternative nodes added further down this loop
+        to_delete.push_back(alt);
+        static_cast<HloAlternatives*>(alt)->Select(0);
+      }
+    }
+
+    for (auto kalt : to_delete) {
+      RemoveInstructionAndUnusedOperands(kalt);
+    }
+    Cleanup();
+    alternatives_.clear();
+    originals_.clear();
+  }
+}
+
+void HloComputation::RecordAlternatives(HloInstruction* original,
+                                        HloInstruction* alt) {
+  // E.g. in fusion, the fused node will be fused again.
+  while (originals_.contains(original)) {
+    original = originals_[original];
+  }
+  alternatives_[original].insert(alt);
+  originals_[alt] = original;
+}
+
+/**
+ * Remove all instructions (except root) that are not used, and all their deps
+ */
+void HloComputation::Prune() {
+  int old_instruction_count = 0;
+  std::vector<HloInstruction*> to_delete;
+  while (old_instruction_count != instruction_count()) {
+    old_instruction_count = instruction_count();
+    to_delete.clear();
+
+    // Note, since sometimes a fusion instruction might be deleted before we
+    // get Pruning it's called computation, so it's not enough to check
+    // for IsFusionComputation
+    bool isFusionComputation = IsFusionComputation() && 
+                               (FusionInstruction() != nullptr);
+    if (!IsEntryComputation()) {
+      if (isFusionComputation) {
+        std::vector<int> removed_param_indices;
+        HloInstruction* fusion_instr = FusionInstruction();
+        for (int64_t i = 0; i < num_parameters(); ++i) {
+          HloInstruction* param = parameter_instruction(i);
+          if (param->IsDead()) {
+            removed_param_indices.push_back(i);
+            fusion_instr->DetachFrom(fusion_instr->mutable_operand(i));
+          }
+        }
+        RemoveUnusedParametersFromFusedComputation();
+        fusion_instr->RemoveOperandsAtAscendingIndices(removed_param_indices);
+      }
+    }
+
+    for (HloInstruction* inst : instructions()) {
+      if (inst->IsDead()) {
+        to_delete.push_back(inst);
+      }
+    }
+    for (auto inst : to_delete) {
+      if (inst->opcode() != xla::HloOpcode::kParameter) {
+        LOG(ERROR) << "Removing side branch at " << inst->name();
+        RemoveInstructionAndUnusedOperands(inst);
+      }
+    }
+  }
+  LOG(ERROR) << instruction_count() << " instructions remaining.";
+  Cleanup();
+}
+
+/**
+ * For root tuple instructions, remove duplicate operands and point the old
+ * GTE instructions at the remaining unique operands. Returns whether or not
+ * any tuple ops were deleted.
+ */
+bool HloComputation::RemoveUnusedTupleOps(int iteration_limit) {
+  int loop_count = 0;
+  bool changed = false;
+  bool changed_this_iteration = true;
+  while (changed_this_iteration && loop_count < iteration_limit) {
+    changed_this_iteration = RemoveUnusedTupleOpsHelper();
+    changed |= changed_this_iteration;
+    loop_count++;
+  }
+  // As a last pass, delink any unused tuple ops that are only utilized by
+  // other instructions in the computation
+  // I.e. even if the tuple operand is used by another instruction, if there
+  // is no GTE using it, delink it from the tuple root
+  changed |= RemoveUnusedTupleOpsHelper(/*delink_unused_tuple_ops*/ true);
+  return changed;
+}
+
+bool HloComputation::RemoveUnusedTupleOpsHelper(bool delink_unused_tuple_ops) {
+  bool changed = false;
+  std::vector<HloInstruction*> to_be_removed;
+  for (HloInstruction* inst : instructions()) {
+    if (inst->IsMultiOutputFusion()) {
+
+      // Skip if this is the root instruction for the entire computation
+      if (inst == this->root_instruction()) {
+        continue;
+      }
+
+      HloInstruction* tuple_inst = inst->fused_expression_root();
+      HloComputation* fused_comp = inst->fused_instructions_computation();
+
+      absl::flat_hash_map<HloInstruction*, int> instr_to_repr_idx;
+      std::vector<int> op_to_be_removed;
+
+      std::vector<HloInstruction*> unused_instructions;
+
+      int operand_count = tuple_inst->operand_count();
+      op_to_be_removed.reserve(operand_count);
+
+      int current_idx = 0;
+      bool cleanup_needed = false;
+
+      std::vector<int> old_to_new_tuple_idx(operand_count, -1);
+
+      // Get all operands that are actually utilized by a GTE
+      std::vector<bool> is_utilized_by_gte(operand_count, false);
+      std::vector<bool> is_utilized_by_any(operand_count, false);
+      for (auto user_inst : inst->users()) {
+        auto gte = Cast<HloGetTupleElementInstruction>(user_inst);
+        is_utilized_by_gte[gte->tuple_index()] = true;
+        is_utilized_by_any[gte->tuple_index()] = true;
+      }
+      // Some operands may not be used by a GTE, but they may be used
+      // by another instruction in the computation, so do not delete those
+      // as well.
+      for (int i = 0; i < operand_count; i++) {
+        HloInstruction* operand = tuple_inst->mutable_operand(i);
+        for (auto* user : operand->users()) {
+          if (user != tuple_inst) {
+            is_utilized_by_any[i] = true;
+          }
+        }
+      }
+
+      current_idx = 0;
+      // Update the indices to account for any operands removed
+      operand_count = tuple_inst->operand_count();
+      for (int i = 0; i < operand_count; i++) {
+        HloInstruction* operand = tuple_inst->mutable_operand(i);
+        // Only delete instructions that not used by any other instructions
+        if (!is_utilized_by_any[i]) {
+          cleanup_needed = true;
+          unused_instructions.push_back(operand);
+          op_to_be_removed.push_back(i);
+        }
+        else {
+          if (!is_utilized_by_gte[i] && delink_unused_tuple_ops) {
+            // If delink_unused_tuple_ops is set to true, 
+            // even if an op is utilized by another instruction, delink it 
+            // from the tuple if it is not utilized by a GTE
+            cleanup_needed = true;
+            op_to_be_removed.push_back(i);
+            tuple_inst->DetachFrom(operand);
+          }
+          else {
+            // Only increase the idx if it's a freshly seen and used
+            // tuple operand
+            old_to_new_tuple_idx[i] = current_idx;
+            instr_to_repr_idx[operand] = current_idx;
+            current_idx++;
+          }
+        }
+      }
+
+      // There exists unused operands
+      if (cleanup_needed) {
+        changed = true;
+        // -------------------------------------------------------
+        // Update the GTE to the new representative index
+        // -------------------------------------------------------
+        int new_tuple_idx;
+        for (auto user_inst : inst->users()) {
+          auto gte = Cast<HloGetTupleElementInstruction>(user_inst);
+          new_tuple_idx = old_to_new_tuple_idx[gte->tuple_index()];
+          gte->set_tuple_index(new_tuple_idx);
+        }
+
+        // -------------------------------------------------------
+        // Remove all the unused tuple operands
+        // -------------------------------------------------------
+        for (auto unused_inst : unused_instructions) {
+          unused_inst->clear_users();
+        }
+        for (auto unused_inst : unused_instructions) {
+          fused_comp->RemoveInstructionAndUnusedOperands(unused_inst);
+        }
+
+        // -------------------------------------------------------
+        // Remove tuple instruction params that are now unused
+        // -------------------------------------------------------
+        // When the tuple operands were removed, any of their unused
+        // operands were recursively removed as well, except for the
+        // instruction params.
+        std::vector<int> removed_param_indices;
+        for (int64_t i = 0; i < fused_comp->num_parameters(); ++i) {
+          HloInstruction* param = fused_comp->parameter_instruction(i);
+          if (param->IsDead()) {
+            removed_param_indices.push_back(i);
+            to_be_removed.push_back(inst->mutable_operand(i));
+            inst->DetachFrom(inst->mutable_operand(i));
+          }
+        }
+        fused_comp->RemoveUnusedParametersFromFusedComputation();
+        inst->RemoveOperandsAtAscendingIndices(removed_param_indices);
+
+        // -------------------------------------------------------
+        // Remove parent computation params that are now unused
+        // -------------------------------------------------------
+        if (!IsEntryComputation() && IsFusionComputation()) {
+          RemoveUnusedParametersFromFusedComputation();
+        }
+
+        // -------------------------------------------------------
+        // Adjust the tuple operands vector and shapes
+        // -------------------------------------------------------
+        tuple_inst->RemoveOperandsAtAscendingIndices(op_to_be_removed);
+
+        // Update the shape of the root tuple instruction and the fusion instr
+        // by removing the tuple shapes at the corresponding indices
+        tuple_inst->mutable_shape()
+                  ->remove_tuple_shapes_at_ascending_indices(op_to_be_removed);
+        inst->mutable_shape()
+            ->remove_tuple_shapes_at_ascending_indices(op_to_be_removed);
+
+        // -------------------------------------------------------
+        // Handle case where only one tuple operand is left
+        // -------------------------------------------------------
+        operand_count = tuple_inst->operand_count();
+        // This is necessary, otherwise during horizontal-fusion, the hori
+        // fusion pass will treat this instruction as a non-tuple instruction
+        // since it only has one operand, leading to shape conflict
+        // during ReplaceInstruction
+        if (operand_count == 1) {
+          HloInstruction* sole_operand = tuple_inst->mutable_operand(0);
+          fused_comp->set_root_instruction(sole_operand);
+          CHECK_EQ(inst->users().size(), 1);
+          fused_comp->RemoveInstructionAndUnusedOperands(tuple_inst);
+
+          HloInstruction* sole_gte = inst->users().at(0);
+
+          // Create a new instruction with shape = that of the new root of the
+          // fused computation, which is = to the shape of its prior sole tuple
+          // operand
+          HloInstruction* new_inst =
+              AddInstruction(inst->CloneWithNewShape(sole_operand->shape()));
+
+          // Remove the GTE instruction, since we no longer have
+          // a tuple as root
+          sole_gte->ReplaceAllUsesWith(new_inst);
+
+          to_be_removed.push_back(inst);
+          to_be_removed.push_back(sole_gte);
+        }
+      }
+    }
+  }
+
+  for (auto instruction : to_be_removed) {
+    auto inst_it = instruction_iterators_.find(instruction);
+    // Only delete if instruction hasn't already been deleted in a previous
+    // iteration of this loop
+    if (inst_it != instruction_iterators_.end()) {
+      RemoveInstructionAndUnusedOperands(instruction);
+    }
+  }
+  Cleanup();
+
+  return changed;
+}
+
+/**
+ * For root tuple instructions, remove duplicate operands and point the old
+ * GTE instructions at the remaining unique operands
+ */
+void HloComputation::RemoveDuplicateTupleOps() {
+  std::vector<HloInstruction*> to_be_removed;
+  for (HloInstruction* inst : instructions()) {
+    if (inst->IsMultiOutputFusion()) {
+      // Skip if this is the root instruction for the entire computation
+      if (inst == this->root_instruction()) {
+        continue;
+      }
+
+      HloInstruction* tuple_inst = inst->fused_expression_root();
+
+      absl::flat_hash_map<HloInstruction*, int> representatives;
+      std::vector<int> old_to_new_tuple_idx;
+      std::vector<int> ops_to_be_removed;
+      int operand_count = tuple_inst->operand_count();
+      ops_to_be_removed.reserve(operand_count);
+      old_to_new_tuple_idx.reserve(operand_count);
+
+      int current_idx = 0;
+      int representative_idx;
+
+      for (int i = 0; i < operand_count; i++) {
+        auto emplace_result = representatives.emplace(
+                                          tuple_inst->mutable_operand(i),
+                                          current_idx);
+        // emplace_result.second = false when we fail to emplace due to the
+        // key-value pair already existing, i.e. we've seen this tuple before
+        if (!emplace_result.second) {
+          // The representative idx of this duplicate is the idx where it
+          // first appears in the tuple
+          representative_idx = emplace_result.first->second;
+          // Save the index of the duplicate tuple to be removed later
+          ops_to_be_removed.push_back(i);
+        }
+        else {
+          representative_idx = current_idx;
+          // Only increase the idx if it's a freshly seen tuple
+          current_idx++;
+        }
+        old_to_new_tuple_idx[i] = representative_idx;
+      }
+
+      // Update the GTE to the new representative index
+      int new_tuple_idx;
+      for (auto* user_inst : inst->users()) {
+        auto* gte = Cast<HloGetTupleElementInstruction>(user_inst);
+        new_tuple_idx = old_to_new_tuple_idx[gte->tuple_index()];
+        gte->set_tuple_index(new_tuple_idx);
+      }
+
+      tuple_inst->RemoveOperandsAtAscendingIndices(ops_to_be_removed);
+
+      // Update the shape of the root tuple instruction and the fusion instr
+      // by removing the tuple shapes at the corresponding indices
+      tuple_inst->mutable_shape()
+                ->remove_tuple_shapes_at_ascending_indices(ops_to_be_removed);
+      inst->mutable_shape()
+          ->remove_tuple_shapes_at_ascending_indices(ops_to_be_removed);
+
+      // Dedup GTEs pointing to same tuple operand
+      absl::flat_hash_map<int, HloGetTupleElementInstruction*>
+          gte_representatives;
+      for (auto user_inst : inst->users()) {
+        auto gte = Cast<HloGetTupleElementInstruction>(user_inst);
+        int tuple_idx = gte->tuple_index();
+
+        // Check if we've already seen a GTE with the same index, if so replace
+        // this duplicate with that original GTE
+        auto emplace_result = gte_representatives.emplace(tuple_idx, gte);
+        if (!emplace_result.second) {
+          HloGetTupleElementInstruction* rep_gte = emplace_result.first->second;
+          gte->ReplaceAllUsesWith(rep_gte);
+          to_be_removed.push_back(gte);
+        }
+      }
+
+    }
+  }
+  for (auto instruction : to_be_removed) {
+    auto inst_it = instruction_iterators_.find(instruction);
+    // Only delete if instruction hasn't already been deleted in a previous
+    // iteration of this loop
+    if (inst_it != instruction_iterators_.end()) {
+      RemoveInstructionAndUnusedOperands(instruction);
+    }
+  }
+  Cleanup();
+}
+
+
 }  // namespace xla

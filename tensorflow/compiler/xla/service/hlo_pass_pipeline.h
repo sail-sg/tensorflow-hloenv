@@ -18,13 +18,16 @@ limitations under the License.
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
 #include "absl/memory/memory.h"
 #include "absl/strings/str_cat.h"
 #include "tensorflow/compiler/xla/service/compilation_stats.h"
+#include "tensorflow/compiler/xla/service/dry_mode.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
+#include "tensorflow/compiler/xla/service/hlo_pass_fix.h"
 #include "tensorflow/compiler/xla/service/hlo_pass_interface.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
@@ -32,6 +35,12 @@ limitations under the License.
 namespace xla {
 
 class PhaseOrderPipeline;
+
+template <typename T>
+struct is_hlo_pass_fix : std::false_type {};
+
+template <typename T, int S>
+struct is_hlo_pass_fix<HloPassFix<T, S>> : std::true_type {};
 
 // Pipeline of HLO passes.
 class HloPassPipeline : public HloPassInterface {
@@ -45,6 +54,36 @@ class HloPassPipeline : public HloPassInterface {
     }
   }
   absl::string_view name() const override { return name_; }
+  static std::set<std::string> dry_sandwich_set;
+
+  // The helpers are used to detect HloPassFix, as the Fix passes will
+  // repeat internally, we can't sandwich it.
+  // TODO: find a solution for this, I think probably we need to remove the fix
+  // passes and iterate externally.
+  template <typename T, typename... Args>
+  T& AddPassHelper(std::false_type, Args&&... args) {
+    CHECK(!run_called_) << "AddPass cannot be called after Run";
+    auto pass = new T(std::forward<Args>(args)...);
+    std::string pass_name(pass->name());
+    if (dry_sandwich_set.find(pass_name) != dry_sandwich_set.end()) {
+      LOG(ERROR) << "Sandwiching " << pass_name << " with dry mode on/off.";
+      passes_.push_back(std::make_unique<DryModeOn>());
+    }
+    passes_.push_back(std::unique_ptr<T>(pass));
+    if (dry_sandwich_set.find(pass_name) != dry_sandwich_set.end()) {
+      passes_.push_back(std::make_unique<DryModeOff>());
+    }
+    return *pass;
+  }
+
+  template <typename T, typename... Args>
+  T& AddPassHelper(std::true_type, Args&&... args) {
+    CHECK(!run_called_) << "AddPass cannot be called after Run";
+    auto pass = new T(std::forward<Args>(args)...);
+    std::string pass_name(pass->name());
+    passes_.push_back(std::unique_ptr<T>(pass));
+    return *pass;
+  }
 
   // Add a pass to the pipeline. It should be called with the arguments for the
   // pass constructor:
@@ -54,10 +93,8 @@ class HloPassPipeline : public HloPassInterface {
   // Returns a reference to the added pass.
   template <typename T, typename... Args>
   T& AddPass(Args&&... args) {
-    CHECK(!run_called_) << "AddPass cannot be called after Run";
-    auto pass = new T(std::forward<Args>(args)...);
-    passes_.push_back(std::unique_ptr<T>(pass));
-    return *pass;
+    return AddPassHelper<T, Args...>(typename is_hlo_pass_fix<T>::type(),
+                                     std::forward<Args>(args)...);
   }
 
   // Add an invariant-checking pass to the pipeline. It will be run before and
@@ -88,6 +125,8 @@ class HloPassPipeline : public HloPassInterface {
   int PassesSize() { return passes_.size(); }
   // Return reference to pass specified by index.
   HloPassInterface& GetPass(int index) { return *passes_[index]; }
+
+  static std::set<std::string> ExtractDrySandwichSetFromEnv();
 
  private:
   // Returns the set of passes which are enabled. DebugOptions can selectively

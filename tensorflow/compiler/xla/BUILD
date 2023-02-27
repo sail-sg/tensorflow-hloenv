@@ -156,7 +156,7 @@ cc_library(
     name = "types",
     hdrs = ["types.h"],
     compatible_with = get_compatible_with_portable(),
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         "//third_party/eigen3",
     ],
@@ -549,7 +549,7 @@ cc_library(
     name = "literal_comparison",
     srcs = ["literal_comparison.cc"],
     hdrs = ["literal_comparison.h"],
-    visibility = [":friends"],
+    visibility = ["//visibility:public"],
     deps = [
         ":error_spec",
         ":literal",

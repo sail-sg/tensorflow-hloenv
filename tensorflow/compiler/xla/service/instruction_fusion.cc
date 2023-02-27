@@ -459,11 +459,15 @@ class ReversePostOrderFusionQueue : public FusionQueue {
   void OnFusingInstruction(HloInstruction* fusion,
                            HloInstruction* original_producer,
                            HloInstruction* original_consumer) override {
-    // Fusing an instruction into a fusion instruction can change the operand
-    // set of the fusion instruction. For simplicity just re-enqueue the
-    // instruction and reconsider it for further fusion in the next iteration.
-    InsertOrDie(&post_order_index_, fusion, post_order_.size());
-    post_order_.push_back(fusion);
+    // we turn dry run on for fusion, so that it won't be modified
+    if (fusion->parent()->dry()) {
+      fusion->set_dry(true);
+    } else {
+      // for dry run mode off, we re-insert into queue as usual
+      // so that it won't affect non-modified XLA passes.
+      InsertOrDie(&post_order_index_, fusion, post_order_.size());
+      post_order_.push_back(fusion);
+    }
   }
 
   void RemoveInstruction(HloInstruction* instruction) override {
@@ -707,6 +711,21 @@ HloInstruction* InstructionFusion::AddFusionInstruction(
   HloInstruction* fusion_instruction;
   auto kind = ChooseKind(producer, consumer);
   if (consumer->opcode() == HloOpcode::kFusion) {
+    if (consumer->dry()) {
+      // Don't keep fusing into it, make a copy when consumer turns on
+      // dry run, we need a clone to continue adding.
+      // TODO(linmin): limit the depth of fusion to avoid combinatorial
+      // explosion
+      HloInstruction* consumer_clone =
+          consumer->parent()->AddInstruction(consumer->Clone());
+      // Since this is in dry mode, this will trigger
+      // RecordAlternatives, which will trace down to the most original
+      // instruction that the fusion node is replacing.
+      // TODO(wangyzh): this could have problems when there're multiple outputs
+      // we need to handle this in multi_output_fusion
+      consumer->parent()->ReplaceInstruction(consumer, consumer_clone);
+      consumer = consumer_clone;
+    }
     fusion_instruction = consumer;
     if (kind != fusion_instruction->fusion_kind()) {
       fusion_instruction->set_fusion_kind(kind);

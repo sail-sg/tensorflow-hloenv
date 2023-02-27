@@ -267,6 +267,7 @@ StatusOr<bool> HloCSE::Run(HloModule* module) {
       }
     }
   }
+  module->RemoveDuplicateTupleOps();
   return changed;
 }
 

@@ -119,6 +119,7 @@ class ShapeVerifier : public DfsHloVisitor {
   Status HandleGetDimensionSize(HloInstruction* get_size) override;
   Status HandleSetDimensionSize(HloInstruction* set_size) override;
   Status HandleAddDependency(HloInstruction* add_dependency) override;
+  Status HandleAlternatives(HloInstruction* alternatives) override;
 
   Status FinishVisit(HloInstruction*) override { return Status::OK(); }
 

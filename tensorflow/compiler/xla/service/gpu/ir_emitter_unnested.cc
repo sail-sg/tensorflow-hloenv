@@ -5203,8 +5203,64 @@ std::vector<std::vector<HloInstruction*>> GroupDisjointReductions(
 
   // Place output instructions in the same set into the same group.
   HloInstructionMap<std::vector<HloInstruction*>> groups;
-  for (HloInstruction* root : roots) {
-    groups[disjoint_sets[root].Get()].push_back(root);
+
+  // Keep track of any group with at least one reduce instruction
+  // If we have any stragglers later, add them to this group
+  std::vector<HloInstruction*>* reduce_group_ptr;
+  for (HloInstruction* root_instr : roots) {
+    // TODO(ohcy) Handle this more elegantly in the future when
+    // we start working on the MLIR emit sections of the codebase
+    if (HloOpcode::kReduce != root_instr->opcode() && IsBroadcastedConstantOrScalar(*root_instr)) {
+
+      // We need to maintain the seen list so we don't add to the group twice
+      HloInstructionMap<bool> seen;
+      for (HloInstruction* output : roots) {
+        if (root_instr->unique_id() != output->unique_id()){
+          if (reachability_map->IsReachable(root_instr, output)) {
+            HloInstruction* disjoint_set_val = disjoint_sets[output].Get();
+            // We haven't seen this disjoint representive val yet
+            if (seen.count(disjoint_set_val) == 0) {
+              groups[disjoint_set_val].push_back(root_instr);
+              seen[disjoint_set_val] = true;
+            }
+          }
+        }
+      }
+    }
+    else {
+      groups[disjoint_sets[root_instr].Get()].push_back(root_instr);
+      if (IsReductionFromOrToContiguousDimensions(*root_instr)) {
+        reduce_group_ptr = &groups[disjoint_sets[root_instr].Get()];
+      }
+    }
+  }
+
+  // At this point, any groups without reduce instructions contain
+  // root instructions that are not reachable from any of the reduce outputs
+  std::vector<HloInstruction*> to_be_deleted;
+  for (auto& group : groups)
+  {
+    bool found_reduce = false;
+    HloInstruction* key = group.first;
+    std::vector<HloInstruction*>& instr_index_group = group.second;
+    for (HloInstruction* hlo : instr_index_group) {
+      if (IsReductionFromOrToContiguousDimensions(*hlo)) {
+        // This group has a reduce instruction, it's fine
+        found_reduce = true;
+        break;
+      } 
+    }
+    if (!found_reduce) {
+      // So just throw them into any group with a reduce instruction
+      for (HloInstruction* hlo : instr_index_group) {
+        reduce_group_ptr->push_back(hlo);
+      }
+      instr_index_group.clear();
+      to_be_deleted.push_back(key);
+    }
+  }
+  for (auto instruction : to_be_deleted) {
+    groups.erase(instruction);
   }
 
   std::vector<std::vector<HloInstruction*>> ret;

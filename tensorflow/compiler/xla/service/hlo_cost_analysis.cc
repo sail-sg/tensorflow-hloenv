@@ -317,6 +317,11 @@ Status HloCostAnalysis::HandleDomain(const HloInstruction* domain) {
   return Status::OK();
 }
 
+Status HloCostAnalysis::HandleAlternatives(const HloInstruction*) {
+  return Status::OK();
+}
+
+
 /* static */
 int64_t HloCostAnalysis::GetDotFlops(const Shape& lhs_shape,
                                      const Shape& result_shape,

@@ -1833,7 +1833,12 @@ HloInstruction* HloFusionInstruction::CloneAndFuseInternal(
       // fusion node. In this case, we don't need to clone
       // 'instruction_to_fuse'.
       CHECK(!in_operand_list);
-      clone = instruction_to_fuse;
+      if (parent()->dry()) {  // if dry mode, make a copy
+        clone = fused_instructions_computation()->AddInstruction(
+            instruction_to_fuse->Clone(/*suffix=*/""));
+      } else {
+        clone = instruction_to_fuse;
+      }
     } else {
       clone = fused_instructions_computation()->AddInstruction(
           instruction_to_fuse->Clone(/*suffix=*/""));
@@ -1935,10 +1940,12 @@ HloInstruction* HloFusionInstruction::CloneAndFuseInternal(
     }
     int64_t index = tuple_elements.size();
     if (instruction_to_fuse->opcode() == HloOpcode::kTuple) {
-      CHECK_EQ(clone, instruction_to_fuse);
+      if (!parent()->dry()) {  // only check when it is not dry mode
+        CHECK_EQ(clone, instruction_to_fuse);
+      }
       index -= clone->operand_count();
       std::vector<HloInstruction*> to_be_removed;
-      const auto& users = clone->users();
+      const auto& users = instruction_to_fuse->users();
       to_be_removed.reserve(users.size());
       for (auto old_gte : users) {
         CHECK_EQ(old_gte->opcode(), HloOpcode::kGetTupleElement);
@@ -2016,6 +2023,8 @@ Status HloFusionInstruction::DeduplicateFusionOperands() {
   if (operands_to_remove.empty()) {
     return Status::OK();
   }
+  // TODO(ohcy): Patch RemoveUnusedParameters to also handle operands, and then
+  // patch this function to account for operands removed in RemoveUnusedParams
   TF_RETURN_IF_ERROR(fused_instructions_computation()
                          ->RemoveUnusedParametersFromFusedComputation());
   RemoveOperandsAtAscendingIndices(operands_to_remove);
@@ -3401,6 +3410,30 @@ HloRngBitGeneratorInstruction::CloneWithNewOperandsImpl(
   CHECK_EQ(new_operands.size(), 1);
   return absl::make_unique<HloRngBitGeneratorInstruction>(
       shape, new_operands[0], algorithm());
+}
+
+HloAlternatives::HloAlternatives(const Shape& shape,
+                                 absl::Span<HloInstruction* const> operands)
+    : HloInstruction(HloOpcode::kAlternatives, shape) {
+  for (auto operand : operands) {
+    AppendOperand(operand);
+  }
+}
+
+void HloAlternatives::Select(int alternative_index) {
+  CHECK_LT(alternative_index, operand_count());
+  HloInstruction* replace = mutable_operand(alternative_index);
+  std::vector<HloInstruction*> alt_users = users();
+  ReplaceUsesWith(alt_users, replace);
+  if (parent()->root_instruction() == this) {
+    parent()->set_root_instruction(replace);
+  }
+}
+
+std::unique_ptr<HloInstruction> HloAlternatives::CloneWithNewOperandsImpl(
+    const Shape& shape, absl::Span<HloInstruction* const> new_operands,
+    HloCloneContext* /*context*/) const {
+  return absl::make_unique<HloAlternatives>(shape, new_operands);
 }
 
 }  // namespace xla

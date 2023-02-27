@@ -63,6 +63,9 @@ namespace xla {
         computation->RemoveInstructionAndUnusedOperands(dead_root));
     changed = true;
   }
+  changed |= computation->RemoveUnusedTupleOps();
+  computation->Prune();
+
   if (changed) {
     VLOG(3) << "After dce:";
     XLA_VLOG_LINES(3, computation->ToString());

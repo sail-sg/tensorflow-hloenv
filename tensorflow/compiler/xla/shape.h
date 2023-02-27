@@ -143,6 +143,29 @@ class Shape {
   void clear_tuple_shapes() { tuple_shapes_.clear(); }
   const std::vector<Shape>& tuple_shapes() const { return tuple_shapes_; }
   std::vector<Shape>* mutable_tuple_shapes() { return &tuple_shapes_; }
+  void remove_tuple_shapes_at_ascending_indices(
+      absl::Span<const int> ascending_indices) {
+    if (ascending_indices.empty()) {
+      return;
+    }
+    int next_index = 0;
+    int removed_count = 0;
+    for (int to_remove : ascending_indices) {
+      while (next_index < to_remove) {
+        tuple_shapes_[next_index - removed_count] = tuple_shapes_[next_index];
+        ++next_index;
+      }
+      CHECK_LT(to_remove, tuple_shapes_.size());
+      ++removed_count;
+      ++next_index;
+    }
+    while (next_index < tuple_shapes_.size()) {
+      tuple_shapes_[next_index - removed_count] = tuple_shapes_[next_index];
+      ++next_index;
+    }
+    CHECK_EQ(removed_count, ascending_indices.size());
+    tuple_shapes_.resize(tuple_shapes_.size() - removed_count);
+  }
 
   // Methods for accessing the layout field.
   bool has_layout() const { return layout_.format() != INVALID_FORMAT; }

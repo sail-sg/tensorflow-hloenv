@@ -111,13 +111,15 @@ bool ShapesCompatibleForMultiOutputFusion(const HloInstruction& instr1,
 // i.e. whether the producer and consumer are loop/input fusible and
 // they are not library calls.
 FusionDecision IsProducerConsumerFusible(const HloInstruction& producer,
-                                         const HloInstruction& consumer);
+                                         const HloInstruction& consumer,
+                                         bool general_fusion = false);
 
 // Whether the instructions are producer-consumer fusible with multiple outputs.
 // That is, the root tuple of the multi-output fusion will contain the results
 // of both, the producer and consumer.
 bool IsProducerConsumerMultiOutputFusible(const HloInstruction& producer,
-                                          const HloInstruction& consumer);
+                                          const HloInstruction& consumer,
+                                          bool general_fusion = false);
 // Whether `instr` is a candidate for sibling fusion or as a consumer in
 // a producer-consumer multi-output fusion.
 bool IsFusibleAsMultiOutputFusionRoot(const HloInstruction& instr);
