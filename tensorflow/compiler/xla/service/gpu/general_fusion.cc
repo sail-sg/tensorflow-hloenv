@@ -65,6 +65,167 @@ bool IsRoot(const HloInstruction* inst) {
   return inst->parent()->root_instruction() == inst;
 }
 
+void FuseTwoSiblings(HloInstruction* left_sibling, HloInstruction* right_sibling) {
+  LOG(INFO) << "Fusing... " << left_sibling->name() << " and " << right_sibling->name();
+
+  // Create the replacement map
+  // replace parameter with the real external input
+  std::unordered_map<HloInstruction*, HloInstruction*> real_external;
+  for (int i = 0; i < left_sibling->operand_count(); ++i) {
+    HloInstruction* operand = left_sibling->mutable_operand(i);
+    if (IsFusion(left_sibling)) {
+      HloComputation* left_comp = left_sibling->fused_instructions_computation();
+      real_external[left_comp->parameter_instruction(i)] = operand;
+    }
+    else {
+      real_external[operand] = operand;
+    }
+  }
+  for (int i = 0; i < right_sibling->operand_count(); ++i) {
+    HloInstruction* operand = right_sibling->mutable_operand(i);
+    if (IsFusion(right_sibling)) {
+      HloComputation* right_comp = right_sibling->fused_instructions_computation();
+      real_external[right_comp->parameter_instruction(i)] = operand;
+    }
+    else {
+      real_external[operand] = operand;
+    }    
+  }
+
+  std::vector<HloInstruction*> post_order;
+  // Get list of new tuple operand params
+  std::vector<HloInstruction*> tuple_operands;
+  // extern_rep represents the instruction that external users connect to. 
+  // Usually it's just the instruction, but for a fusion, it refers to the 
+  // gte for that tuple operand.  
+  std::unordered_map<HloInstruction*, HloInstruction*> extern_rep; 
+
+  auto process_sibling = [&](HloInstruction* sibling) {
+    // Put everything in top order
+    if (IsFusion(sibling)) {
+      auto sibling_post_order =
+          sibling->fused_instructions_computation()->MakeInstructionPostOrder();
+      post_order.insert(post_order.end(),
+                        std::make_move_iterator(sibling_post_order.begin()),
+                        std::make_move_iterator(sibling_post_order.end()));
+    } else {
+      post_order.push_back(sibling);
+    }
+
+    // Assemble new tuple operands and get the external rep of the tuple operand
+    // external rep = what users of that operand actually connect to, e.g. a 
+    //                GTE that accesses that tuple operand if it's multi
+    //                output, else just the instruction itself
+    if (IsFusion(sibling)) {
+      HloInstruction* sibling_root = sibling->fused_expression_root();
+
+      if (IsTuple(sibling_root)) {
+        // Get external users
+        for (auto* user_inst : sibling->users()) {
+          auto* gte_inst = Cast<HloGetTupleElementInstruction>(user_inst);
+          auto* tuple_operand = sibling_root->mutable_operand(gte_inst->tuple_index());
+          extern_rep[tuple_operand] = gte_inst;
+        }
+
+        for (int i = 0; i < sibling_root->operand_count(); ++i) {
+          HloInstruction* tuple_operand = sibling_root->mutable_operand(i);
+          tuple_operands.push_back(tuple_operand);
+        }
+      }
+      else {
+        tuple_operands.push_back(sibling_root);
+        extern_rep[sibling_root] = sibling;
+      }
+    }
+    else {
+      tuple_operands.push_back(sibling);
+      extern_rep[sibling] = sibling;
+    }
+  };
+
+  process_sibling(left_sibling);
+  process_sibling(right_sibling);
+
+  // now make params and clone instrutions
+  HloComputation::Builder builder("fuse_two_siblings");
+  int param_index = 0;
+  std::vector<HloInstruction*> uniq_extern_operands;
+  std::unordered_map<HloInstruction*, HloInstruction*> extern_operand_param_map;
+  std::unordered_map<HloInstruction*, HloInstruction*> old_to_new;
+
+  for (auto* inst : post_order) {
+    // don't clone parameter & tuple
+    if (IsParameter(inst) || IsTuple(inst)) {
+      continue;
+    }
+
+    const auto& operands = inst->operands();
+    std::vector<HloInstruction*> new_operands;
+    HloInstruction* new_operand;
+    for (auto* operand : operands) {
+      if (old_to_new.find(operand) != old_to_new.end()) {
+        // Then replace with the newly cloned instructions
+        new_operand = old_to_new[operand];
+      } 
+      // Because we are in post order, if we haven't seen it yet then that 
+      // means that this is an external instruction
+      else {
+        HloInstruction* external_inst = real_external[operand];
+        if (extern_operand_param_map.find(external_inst) != extern_operand_param_map.end()) {
+          new_operand = extern_operand_param_map[external_inst];
+        }
+        else {
+          // Otherwise create a new param for it
+          auto* param = builder.AddInstruction(HloInstruction::CreateParameter(
+              param_index, external_inst->shape(),
+              "param" + std::to_string(param_index)));
+          extern_operand_param_map[external_inst] = param;
+
+          uniq_extern_operands.push_back(external_inst);
+          
+          new_operand = param;
+          param_index++;
+        }
+      } 
+      new_operands.push_back(new_operand);
+    }
+    old_to_new[inst] = builder.AddInstruction(
+        inst->CloneWithNewOperands(inst->shape(), new_operands));
+  }
+
+  std::vector<HloInstruction*> cloned_tuple_operands;
+  for (auto* inst : tuple_operands) {
+    cloned_tuple_operands.push_back(old_to_new[inst]);
+  }
+
+
+  HloInstruction* root = nullptr;
+  CHECK_GT(tuple_operands.size(), 1);
+  root = builder.AddInstruction(HloInstruction::CreateTuple(cloned_tuple_operands));
+
+  HloInstruction::FusionKind fusion_kind = (IsInputFusible(*left_sibling) || IsInputFusible(*right_sibling))
+                                                ? HloInstruction::FusionKind::kInput
+                                                : HloInstruction::FusionKind::kLoop;
+
+  HloComputation* comp =
+      left_sibling->parent()->parent()->AddEmbeddedComputation(builder.Build(root));
+
+  HloInstruction* fusion =
+      left_sibling->parent()->AddInstruction(HloInstruction::CreateFusion(
+          root->shape(), fusion_kind,
+          uniq_extern_operands, comp));
+
+  for (int i = 0; i < tuple_operands.size(); ++i) {
+    auto* tuple_operand = tuple_operands[i];
+
+    if (extern_rep.find(tuple_operand) != extern_rep.end()) {
+      HloInstruction* new_gte = left_sibling->parent()->AddInstruction(
+          HloInstruction::CreateGetTupleElement(fusion, i));
+      extern_rep[tuple_operand]->ReplaceAllUsesWith(new_gte);
+    }
+  }
+}
+
 void FuseTwo(HloInstruction* consumer, HloInstruction* producer) {
   std::unordered_map<HloInstruction*, HloInstruction*> replacements;
   std::vector<HloInstruction*> extra;
@@ -363,7 +524,6 @@ bool GeneralFusion::ShouldFuseProducerIntoConsumer(HloInstruction* producer,
   bool fusible = true;
 
   int external_user_count = 0;
-  HloInstruction* actual_user;
   // We need to check only for users that aren't parameters in the consumer.
   for (auto* user : producer->users()) {
     if (IsGTE(user)) {
@@ -397,11 +557,71 @@ bool GeneralFusion::ShouldFuseProducerIntoConsumer(HloInstruction* producer,
   return fusible;
 }
 
+bool IsSiblingFusionValidCandidate(HloInstruction* candidate) {
+  if (candidate->opcode() == HloOpcode::kFusion) {
+    if (candidate->fused_expression_root()->opcode() ==
+          HloOpcode::kDynamicUpdateSlice) {
+      return false;
+    }
+  }
+
+  if (!IsFusibleAsMultiOutputFusionRoot(*candidate)) {
+    return false;
+  }
+
+  if (candidate->opcode() == HloOpcode::kCustomCall) {
+    return false;
+  }
+
+  return true;
+}
+
+// Checks if its legal to fuse when left <-> right, specific to left/right order
+// 
+bool LegalToSiblingFuse(HloInstruction* left, HloInstruction* right) {
+  // If we're fusing fusions only do it if the fusion kind matches. Loop fusions
+  // merge into bigger loop fusions and input (reduce) fusions become fusions
+  // with multiple reduce outputs. We could fuse reduce and loop fusions
+  // together too (the result being an input fusion) if we find cases where this
+  // improves things. Also disable fusing standalone input-fusible reduces into
+  // loop fusions.
+  if (!IsSiblingFusionValidCandidate(left) || 
+      !IsSiblingFusionValidCandidate(right)) {
+    return false;
+  }
+
+  if (left->opcode() == HloOpcode::kFusion && 
+      right->opcode() == HloOpcode::kFusion &&
+      left->fusion_kind() != right->fusion_kind()) {
+    return false;
+  }
+
+  if (IsReductionFromOrToContiguousDimensions(*right) &&
+       left->IsLoopFusion()) {
+    return false;
+  }
+  if (IsReductionFromOrToContiguousDimensions(*left) &&
+       right->IsLoopFusion()) {
+    return false;
+  }
+
+  if (!ShapesCompatibleForMultiOutputFusion(*left, *right)) {
+    return false;
+  }
+
+  if (left == right) {
+    return false;
+  }
+
+  return true;
+}
+
 bool GeneralFusion::DoGeneralFusion(HloComputation* comp) {
   reachability_.reset();
   reachability_ = HloReachabilityMap::Build(comp);
   std::vector<HloInstruction*> post_order = comp->MakeInstructionPostOrder();
   int count = 0;
+  LOG(INFO) << "Performing Vertical fusion for comp " << comp->name();
   while (!post_order.empty()) {
     HloInstruction* inst = post_order.back();
     post_order.pop_back();
@@ -432,6 +652,60 @@ bool GeneralFusion::DoGeneralFusion(HloComputation* comp) {
       count++;
     }
   }
+
+  LOG(INFO) << "Performing Sibling fusion for comp " << comp->name();
+  post_order = comp->MakeInstructionPostOrder();
+  while (!post_order.empty()) {
+    HloInstruction* inst = post_order.back();
+    post_order.pop_back();
+
+    if (!(inst->dry())) {
+      continue;
+    }
+
+    if (inst->IsDead()) {
+      continue;
+    }
+    std::vector<HloInstruction*> siblings;
+    for (auto* user : inst->users()) {
+      if (IsGTE(user)) {
+        LOG(INFO) << "Collecting siblings: GTE user " << user->name();
+        // If GTE, trace back one more step
+        if (user->users().size() > 0) {
+          HloInstruction* actual_sibling = user->users()[0];
+          if (actual_sibling->dry()) {
+            siblings.push_back(actual_sibling);
+          }
+        }
+      } else {
+        LOG(INFO) << "Collecting siblings: normal user " << user->name();
+        if (user->dry()) {
+          siblings.push_back(user);
+        }
+      }
+    }
+
+    for (auto i = siblings.begin(); i != siblings.end(); ++i) {
+      for (auto j = i + 1; j != siblings.end(); ++j) {
+        HloInstruction* left = *i;
+        HloInstruction* right = *j;
+
+        CHECK(left->dry());
+        CHECK(right->dry());
+
+        LOG(INFO) << "Considering " << left->name() << " and " << right->name();
+        if (reachability_->IsConnected(left, right) || 
+            !LegalToSiblingFuse(left, right)) {
+          continue;
+        }
+        FuseTwoSiblings(/*left_sibling=*/left, /*right_sibling=*/right);
+        count++;
+      }
+    }    
+
+  }
+  LOG(INFO) << "Done with General Fusion for " << comp->name();
+
   return count > 0;
 }
 
